@@ -2,6 +2,8 @@ const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
 const { saveKeypairToFile, loadKeypairFromFile, loadChildWalletsFromFile, saveChildWalletsToFile, getWalletBalance, getSolanaConnection, WALLETS_DIR } = require('../utils/walletUtils');
 const { sendAndConfirmTransactionRobustly, sleep } = require('../utils/transactionUtils');
+// PHASE 2: Enhanced SPL Token Balance Support
+const { getTokenBalance, getAllTokenBalances, getWalletSummary, getFormattedTokenBalance, hasTokens } = require('../utils/solanaUtils');
 
 const MOTHER_WALLET_FILE = 'motherWallet.json';
 const CHILD_WALLETS_FILE = 'childWallets.json';
@@ -269,13 +271,328 @@ async function returnFundsToMotherWalletService(motherWalletPublicKeyBs58, sourc
     return results;
 }
 
+// ============================================================================
+// PHASE 2: ENHANCED SPL TOKEN BALANCE SERVICES
+// ============================================================================
+
+/**
+ * Gets SPL token balance for a specific mint address.
+ * MONOCODE Compliance: Explicit error handling with structured responses
+ * @param {string} publicKeyString - The wallet's public key as string
+ * @param {string} mintAddress - The token mint address as string
+ * @returns {Promise<object>} Token balance info with error handling
+ */
+async function getTokenBalanceService(publicKeyString, mintAddress) {
+    console.log(`[WalletService] Getting token balance for wallet: ${publicKeyString.slice(0, 8)}..., mint: ${mintAddress.slice(0, 8)}...`);
+    
+    try {
+        // Input validation
+        if (!publicKeyString || !mintAddress) {
+            throw new Error('Both publicKey and mintAddress are required');
+        }
+        
+        // Validate public key format
+        try {
+            new web3.PublicKey(publicKeyString);
+        } catch (error) {
+            throw new Error(`Invalid public key format: ${error.message}`);
+        }
+        
+        // Validate mint address format
+        try {
+            new web3.PublicKey(mintAddress);
+        } catch (error) {
+            throw new Error(`Invalid mint address format: ${error.message}`);
+        }
+        
+        const tokenInfo = await getTokenBalance(publicKeyString, mintAddress);
+        
+        // Enhanced response with additional metadata
+        const response = {
+            publicKey: publicKeyString,
+            mint: mintAddress,
+            balance: tokenInfo.balance,
+            decimals: tokenInfo.decimals,
+            uiAmount: tokenInfo.balance / Math.pow(10, tokenInfo.decimals),
+            timestamp: new Date().toISOString(),
+            status: 'success'
+        };
+        
+        // Include error if present but still return data
+        if (tokenInfo.error) {
+            response.warning = tokenInfo.error;
+            response.status = 'partial_success';
+        }
+        
+        console.log(`[WalletService] ✅ Token balance retrieved: ${response.uiAmount} UI units`);
+        return response;
+        
+    } catch (error) {
+        console.error(`[WalletService] ❌ Error in getTokenBalanceService: ${error.message}`);
+        
+        // Structured error response following MONOCODE Explicit Error Handling
+        return {
+            publicKey: publicKeyString,
+            mint: mintAddress,
+            balance: 0,
+            decimals: 0,
+            uiAmount: 0,
+            timestamp: new Date().toISOString(),
+            status: 'error',
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Gets all SPL token balances for a wallet.
+ * MONOCODE Compliance: Observable implementation with performance tracking
+ * @param {string} publicKeyString - The wallet's public key as string
+ * @returns {Promise<object>} All token balances with metadata
+ */
+async function getAllTokenBalancesService(publicKeyString) {
+    console.log(`[WalletService] Getting all token balances for wallet: ${publicKeyString.slice(0, 8)}...`);
+    const startTime = Date.now();
+    
+    try {
+        // Input validation
+        if (!publicKeyString) {
+            throw new Error('publicKey is required');
+        }
+        
+        // Validate public key format
+        try {
+            new web3.PublicKey(publicKeyString);
+        } catch (error) {
+            throw new Error(`Invalid public key format: ${error.message}`);
+        }
+        
+        const [tokenBalances, tokenCheck] = await Promise.all([
+            getAllTokenBalances(publicKeyString),
+            hasTokens(publicKeyString)
+        ]);
+        
+        // Enhanced response with performance metrics
+        const duration = Date.now() - startTime;
+        const response = {
+            publicKey: publicKeyString,
+            tokens: tokenBalances.map(token => ({
+                mint: token.mint,
+                balance: token.balance,
+                decimals: token.decimals,
+                uiAmount: token.balance / Math.pow(10, token.decimals)
+            })),
+            summary: {
+                tokenCount: tokenBalances.length,
+                hasTokens: tokenCheck.hasTokens,
+                totalTokenAccounts: tokenCheck.tokenCount
+            },
+            performance: {
+                queryDuration: duration,
+                timestamp: new Date().toISOString()
+            },
+            status: 'success'
+        };
+        
+        console.log(`[WalletService] ✅ All token balances retrieved: ${tokenBalances.length} tokens in ${duration}ms`);
+        return response;
+        
+    } catch (error) {
+        console.error(`[WalletService] ❌ Error in getAllTokenBalancesService: ${error.message}`);
+        
+        // Graceful fallback response
+        const duration = Date.now() - startTime;
+        return {
+            publicKey: publicKeyString,
+            tokens: [],
+            summary: {
+                tokenCount: 0,
+                hasTokens: false,
+                totalTokenAccounts: 0
+            },
+            performance: {
+                queryDuration: duration,
+                timestamp: new Date().toISOString()
+            },
+            status: 'error',
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Gets complete wallet summary including SOL and all SPL tokens.
+ * MONOCODE Compliance: Progressive construction with comprehensive data
+ * @param {string} publicKeyString - The wallet's public key as string
+ * @returns {Promise<object>} Complete wallet summary with enhanced metadata
+ */
+async function getWalletSummaryService(publicKeyString) {
+    console.log(`[WalletService] Getting complete wallet summary for: ${publicKeyString.slice(0, 8)}...`);
+    const startTime = Date.now();
+    
+    try {
+        // Input validation
+        if (!publicKeyString) {
+            throw new Error('publicKey is required');
+        }
+        
+        // Validate public key format
+        try {
+            new web3.PublicKey(publicKeyString);
+        } catch (error) {
+            throw new Error(`Invalid public key format: ${error.message}`);
+        }
+        
+        const walletSummary = await getWalletSummary(publicKeyString);
+        
+        // Enhanced response with additional service-layer metadata
+        const duration = Date.now() - startTime;
+        const response = {
+            publicKey: publicKeyString,
+            sol: {
+                balance: walletSummary.sol.balance,
+                lamports: walletSummary.sol.lamports,
+                usdValue: null // Placeholder for future price integration
+            },
+            tokens: walletSummary.tokens.map(token => ({
+                mint: token.mint,
+                balance: token.balance,
+                decimals: token.decimals,
+                uiAmount: token.balance / Math.pow(10, token.decimals),
+                symbol: token.symbol || null, // Placeholder for future symbol lookup
+                usdValue: null // Placeholder for future price integration
+            })),
+            summary: {
+                totalAssets: 1 + walletSummary.tokens.length, // SOL + tokens
+                solBalance: walletSummary.sol.balance,
+                tokenCount: walletSummary.tokens.length,
+                hasTokens: walletSummary.tokens.length > 0,
+                lastUpdated: walletSummary.timestamp
+            },
+            performance: {
+                queryDuration: duration,
+                timestamp: new Date().toISOString()
+            },
+            status: 'success'
+        };
+        
+        // Include error information if present in wallet summary
+        if (walletSummary.error) {
+            response.warning = walletSummary.error;
+            response.status = 'partial_success';
+        }
+        
+        console.log(`[WalletService] ✅ Complete wallet summary: ${response.sol.balance} SOL, ${response.tokens.length} tokens in ${duration}ms`);
+        return response;
+        
+    } catch (error) {
+        console.error(`[WalletService] ❌ Error in getWalletSummaryService: ${error.message}`);
+        
+        // Comprehensive fallback response
+        const duration = Date.now() - startTime;
+        return {
+            publicKey: publicKeyString,
+            sol: {
+                balance: 0,
+                lamports: 0,
+                usdValue: null
+            },
+            tokens: [],
+            summary: {
+                totalAssets: 0,
+                solBalance: 0,
+                tokenCount: 0,
+                hasTokens: false,
+                lastUpdated: new Date().toISOString()
+            },
+            performance: {
+                queryDuration: duration,
+                timestamp: new Date().toISOString()
+            },
+            status: 'error',
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Gets formatted token balance with UI-ready values.
+ * MONOCODE Compliance: Dependency transparency with clear formatting
+ * @param {string} publicKeyString - The wallet's public key as string
+ * @param {string} mintAddress - The token mint address as string
+ * @returns {Promise<object>} Formatted token balance info
+ */
+async function getFormattedTokenBalanceService(publicKeyString, mintAddress) {
+    console.log(`[WalletService] Getting formatted token balance for mint: ${mintAddress.slice(0, 8)}...`);
+    
+    try {
+        // Input validation
+        if (!publicKeyString || !mintAddress) {
+            throw new Error('Both publicKey and mintAddress are required');
+        }
+        
+        const formattedBalance = await getFormattedTokenBalance(publicKeyString, mintAddress);
+        
+        const response = {
+            publicKey: publicKeyString,
+            mint: mintAddress,
+            rawBalance: formattedBalance.rawBalance,
+            uiAmount: formattedBalance.uiAmount,
+            decimals: formattedBalance.decimals,
+            formatted: {
+                display: formattedBalance.uiAmount.toFixed(formattedBalance.decimals),
+                scientific: formattedBalance.uiAmount.toExponential(3),
+                compact: formattedBalance.uiAmount < 1000 ? 
+                    formattedBalance.uiAmount.toFixed(2) : 
+                    `${(formattedBalance.uiAmount / 1000).toFixed(1)}k`
+            },
+            timestamp: new Date().toISOString(),
+            status: 'success'
+        };
+        
+        // Include error if present
+        if (formattedBalance.error) {
+            response.warning = formattedBalance.error;
+            response.status = 'partial_success';
+        }
+        
+        console.log(`[WalletService] ✅ Formatted token balance: ${response.uiAmount} UI units`);
+        return response;
+        
+    } catch (error) {
+        console.error(`[WalletService] ❌ Error in getFormattedTokenBalanceService: ${error.message}`);
+        
+        return {
+            publicKey: publicKeyString,
+            mint: mintAddress,
+            rawBalance: 0,
+            uiAmount: 0,
+            decimals: 0,
+            formatted: {
+                display: '0.00',
+                scientific: '0.000e+0',
+                compact: '0.00'
+            },
+            timestamp: new Date().toISOString(),
+            status: 'error',
+            error: error.message
+        };
+    }
+}
+
 
 module.exports = {
+    // Existing services (backward compatibility maintained)
     createOrImportMotherWalletService,
     createBundledWalletsService,
     importBundledWalletsService,
-    getWalletBalanceService,
+    getWalletBalanceService, // Original SOL balance service
     fundChildWalletsService,
     returnFundsToMotherWalletService,
-    // ... other services to be added
+    
+    // PHASE 2: Enhanced SPL Token Balance Services
+    getTokenBalanceService,
+    getAllTokenBalancesService,
+    getWalletSummaryService,
+    getFormattedTokenBalanceService
 }; 

@@ -35,9 +35,133 @@ This API provides endpoints for managing Solana wallets and interacting with the
 - **Body:** `{ "leaveDust": <boolean> }`
 - **Response:** Transaction results for each wallet.
 
-#### 6. Get Wallet Balance
+#### 6. Get Wallet Balance (Enhanced SPL Token Support)
+
+##### 6.1 SOL Balance Only
+- **GET** `/api/wallets/:publicKey/balance/sol`
+- **Response:** 
+  ```json
+  {
+    "message": "SOL balance retrieved successfully.",
+    "data": {
+      "publicKey": "wallet_address",
+      "sol": {
+        "balance": 1.5,
+        "lamports": 1500000000,
+        "usdValue": null
+      },
+      "timestamp": "2024-01-01T00:00:00Z",
+      "endpoint": "sol"
+    }
+  }
+  ```
+
+##### 6.2 Specific SPL Token Balance
+- **GET** `/api/wallets/:publicKey/balance/token/:mintAddress`
+- **Response:**
+  ```json
+  {
+    "message": "Token balance retrieved successfully.",
+    "data": {
+      "publicKey": "wallet_address",
+      "token": {
+        "mint": "token_mint_address",
+        "balance": 1000000,
+        "decimals": 6,
+        "uiAmount": 1.0,
+        "symbol": null,
+        "usdValue": null
+      },
+      "metadata": {
+        "status": "success",
+        "timestamp": "2024-01-01T00:00:00Z"
+      },
+      "endpoint": "token"
+    }
+  }
+  ```
+
+##### 6.3 Complete Wallet Summary (SOL + All SPL Tokens)
+- **GET** `/api/wallets/:publicKey/balance/all`
+- **Response:**
+  ```json
+  {
+    "message": "Complete wallet balance retrieved successfully.",
+    "data": {
+      "publicKey": "wallet_address",
+      "sol": {
+        "balance": 1.5,
+        "lamports": 1500000000,
+        "usdValue": null
+      },
+      "tokens": [
+        {
+          "mint": "token_mint_address",
+          "balance": 1000000,
+          "decimals": 6,
+          "uiAmount": 1.0,
+          "symbol": null,
+          "usdValue": null
+        }
+      ],
+      "summary": {
+        "totalAssets": 2,
+        "solBalance": 1.5,
+        "tokenCount": 1,
+        "hasTokens": true,
+        "lastUpdated": "2024-01-01T00:00:00Z",
+        "performance": {
+          "apiResponseTime": 1500,
+          "serviceResponseTime": 1200
+        }
+      },
+      "metadata": {
+        "status": "success",
+        "timestamp": "2024-01-01T00:00:00Z"
+      },
+      "endpoint": "all"
+    }
+  }
+  ```
+
+##### 6.4 All SPL Tokens Only (Without SOL)
+- **GET** `/api/wallets/:publicKey/balance/tokens`
+- **Response:**
+  ```json
+  {
+    "message": "All token balances retrieved successfully.",
+    "data": {
+      "publicKey": "wallet_address",
+      "tokens": [
+        {
+          "mint": "token_mint_address",
+          "balance": 1000000,
+          "decimals": 6,
+          "uiAmount": 1.0
+        }
+      ],
+      "summary": {
+        "tokenCount": 1,
+        "hasTokens": true,
+        "totalTokenAccounts": 1,
+        "performance": {
+          "apiResponseTime": 800,
+          "serviceResponseTime": 600
+        }
+      },
+      "metadata": {
+        "status": "success",
+        "timestamp": "2024-01-01T00:00:00Z"
+      },
+      "endpoint": "tokens"
+    }
+  }
+  ```
+
+##### 6.5 Legacy Endpoint (Backward Compatibility)
 - **GET** `/api/wallets/:publicKey/balance`
-- **Response:** `{ "balance": <number> }`
+- **Response:** `{ "message": "Balance retrieved successfully.", "data": { "publicKey": "...", "balance": 1.5 } }`
+- **Note:** This endpoint maintains backward compatibility and returns SOL balance only.
 
 ---
 
@@ -134,8 +258,26 @@ This API provides endpoints for managing Solana wallets and interacting with the
   - *Expected:* Returns list of wallets, with correct naming.
 - **Funding and returning funds works.**
   - *Expected:* SOL is transferred, balances update, transaction signatures are valid.
-- **Wallet balances can be queried.**
-  - *Expected:* Returns correct SOL balance.
+- **Enhanced wallet balance queries work for all endpoints.**
+  - *Expected:* Returns correct SOL balance, SPL token balances, and complete wallet summaries.
+
+## Enhanced Balance Endpoints Testing
+
+- **SOL balance endpoint works correctly.**
+  - *Test:* `GET /api/wallets/:publicKey/balance/sol`
+  - *Expected:* Returns SOL balance with proper lamports conversion and metadata.
+- **Specific token balance endpoint works correctly.**
+  - *Test:* `GET /api/wallets/:publicKey/balance/token/:mintAddress`
+  - *Expected:* Returns token balance with decimals, UI amount, and proper error handling for non-existent tokens.
+- **Complete wallet summary endpoint works correctly.**
+  - *Test:* `GET /api/wallets/:publicKey/balance/all`
+  - *Expected:* Returns SOL + all SPL tokens with performance metrics and comprehensive metadata.
+- **All tokens endpoint works correctly.**
+  - *Test:* `GET /api/wallets/:publicKey/balance/tokens`
+  - *Expected:* Returns all SPL tokens without SOL, includes token count and existence flags.
+- **Legacy balance endpoint maintains backward compatibility.**
+  - *Test:* `GET /api/wallets/:publicKey/balance`
+  - *Expected:* Original SOL-only response format preserved, no breaking changes.
 
 ## Pump Portal Trading
 
@@ -180,6 +322,75 @@ This API provides endpoints for managing Solana wallets and interacting with the
 - **API returns clear, consistent, and informative responses.**
 - **No unhandled exceptions or server crashes.**
 - **No private keys or sensitive data are leaked in any response.**
+
+---
+
+---
+
+## Manual Testing Commands for Enhanced Balance Endpoints
+
+### Testing SOL Balance
+```bash
+# Test SOL balance only
+curl -X GET "http://localhost:3000/api/wallets/YOUR_WALLET_ADDRESS/balance/sol"
+
+# Expected: SOL balance with lamports and metadata
+```
+
+### Testing Specific Token Balance
+```bash
+# Test USDC balance (example)
+curl -X GET "http://localhost:3000/api/wallets/YOUR_WALLET_ADDRESS/balance/token/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+# Test with non-existent token (error handling)
+curl -X GET "http://localhost:3000/api/wallets/YOUR_WALLET_ADDRESS/balance/token/invalid_mint_address"
+
+# Expected: Token balance with decimals, UI amount, or proper error response
+```
+
+### Testing Complete Wallet Summary
+```bash
+# Test complete wallet overview
+curl -X GET "http://localhost:3000/api/wallets/YOUR_WALLET_ADDRESS/balance/all"
+
+# Expected: SOL + all SPL tokens with performance metrics
+```
+
+### Testing All Tokens Only
+```bash
+# Test all SPL tokens without SOL
+curl -X GET "http://localhost:3000/api/wallets/YOUR_WALLET_ADDRESS/balance/tokens"
+
+# Expected: Array of all SPL tokens with summary metadata
+```
+
+### Testing Backward Compatibility
+```bash
+# Test legacy endpoint still works
+curl -X GET "http://localhost:3000/api/wallets/YOUR_WALLET_ADDRESS/balance"
+
+# Expected: Original SOL-only response format (backward compatible)
+```
+
+### Error Scenario Testing
+```bash
+# Test invalid wallet address
+curl -X GET "http://localhost:3000/api/wallets/invalid_address/balance/sol"
+
+# Test missing parameters
+curl -X GET "http://localhost:3000/api/wallets//balance/token/MINT_ADDRESS"
+
+# Expected: Proper HTTP status codes (400, 404, 500) and structured error responses
+```
+
+### Performance Testing Examples
+```bash
+# Test response times for different endpoints
+time curl -X GET "http://localhost:3000/api/wallets/YOUR_WALLET_ADDRESS/balance/sol"
+time curl -X GET "http://localhost:3000/api/wallets/YOUR_WALLET_ADDRESS/balance/all"
+
+# Expected: SOL queries <5s, complete summaries <15s (may be slower with rate limiting)
+```
 
 ---
 
