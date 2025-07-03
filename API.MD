@@ -165,31 +165,54 @@ This API provides endpoints for managing Solana wallets and interacting with the
 
 ---
 
-### **Pump Portal Trading**
+### **Trading**
+
+#### **Image Upload Integration**
+
+The API now supports secure image uploads for token creation using multipart/form-data uploads. Key features:
+
+- **Memory-based Processing:** Images are processed in RAM and streamed directly to
+- **No Disk Storage:** Files are never saved to the server filesystem (stateless operation)
+- **Security:** File type validation, size limits (5MB), and comprehensive error handling
+- **Render-Compatible:** Works perfectly with ephemeral containers and horizontal scaling
+
+**Supported Image Formats:** PNG, JPG, JPEG, GIF, WebP, SVG  
+**Maximum File Size:** 5MB  
+**Upload Field Name:** `image`
 
 #### 1. Create Token and Initial Buy
 - **POST** `/api/pump/create-and-buy`
-- **Body:** 
-  ```json
-  {
-    "name": "...",
-    "symbol": "...",
-    "description": "...",
-    "twitter": "...",
-    "telegram": "...",
-    "website": "...",
-    "showName": true,
-    "initialSupplyAmount": "1000000000",
-    "imageFileName": "...",
-    "buyAmountsSOL": {
-      "devWalletBuySOL": 0.01,
-      "firstBundledWallet1BuySOL": 0.01,
-      ...
-    },
-    "slippageBps": 2500
-  }
+- **Content-Type:** `multipart/form-data`
+- **Body Parameters:**
+  - **Form Fields:**
+    ```
+    name: string (required)
+    symbol: string (required)
+    description: string (required)
+    twitter: string (optional)
+    telegram: string (optional)
+    website: string (optional)
+    showName: boolean (required)
+    initialSupplyAmount: string (optional, default: "1000000000")
+    buyAmountsSOL: JSON string (required)
+    slippageBps: number (optional, default: 2500)
+    ```
+  - **File Field:**
+    ```
+    image: file (optional) - Image file for the token (PNG, JPG, GIF, etc.)
+    ```
+- **Example cURL:**
+  ```bash
+  curl -X POST http://localhost:3000/api/pump/create-and-buy \
+    -F "name=My Token" \
+    -F "symbol=MTK" \
+    -F "description=A great token" \
+    -F "showName=true" \
+    -F "buyAmountsSOL={\"devWalletBuySOL\":0.01,\"firstBundledWallet1BuySOL\":0.01}" \
+    -F "image=@/path/to/token-image.png"
   ```
 - **Response:** Mint address, bundle ID, transaction details, status.
+- **Note:** Images are processed in memory and streamed directly. No files are saved to disk.
 
 #### 2. Batch Buy Token
 - **POST** `/api/pump/batch-buy`
@@ -279,10 +302,19 @@ This API provides endpoints for managing Solana wallets and interacting with the
   - *Test:* `GET /api/wallets/:publicKey/balance`
   - *Expected:* Original SOL-only response format preserved, no breaking changes.
 
-## Pump Portal Trading
+## Trading
 
 - **Create-and-buy endpoint creates a token and performs initial buys.**
   - *Expected:* Returns mint address, bundle ID, all transactions confirmed, token visible on Solscan/pump.fun.
+- **Image upload functionality works correctly.**
+  - *Test:* Send multipart/form-data with image file
+  - *Expected:* Image is processed in memory, uploaded, and included in token metadata.
+- **Fallback behavior works when no image is provided.**
+  - *Test:* Send create-and-buy request without image field
+  - *Expected:* Token is created successfully without image, metadata-only upload.
+- **Image validation works correctly.**
+  - *Test:* Upload invalid file types or oversized files
+  - *Expected:* Clear error messages returned, request rejected before processing.
 - **Batch-buy endpoint buys token from all eligible wallets in batches.**
   - *Expected:* All specified wallets buy the token, bundles are confirmed, balances update.
 - **Sell-dev endpoint sells the specified percentage of tokens from DevWallet.**

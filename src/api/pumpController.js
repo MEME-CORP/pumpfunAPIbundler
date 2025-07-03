@@ -33,30 +33,32 @@ async function createAndBuy(req, res) {
 
         const tokenMetadata = { name, symbol, description, twitter, telegram, website, showName, initialSupplyAmount };
         
-        // Handle image path - Assuming image is uploaded and available at a temp path
-        // For a real app, this would come from multer or similar middleware
-        let imageFilePath = null;
-        if (req.file && req.file.path) { // Example if using multer: req.file.path
-            imageFilePath = req.file.path;
+        // Handle image upload - Now using multer memory storage
+        // MONOCODE Compliance: Explicit Error Handling and Observable Implementation
+        let imageData = null;
+        
+        if (req.file) {
+            // Image uploaded via multipart/form-data
+            console.log(`[PumpController] Image uploaded: ${req.file.originalname} (${req.file.size} bytes, ${req.file.mimetype})`);
+            imageData = {
+                buffer: req.file.buffer,
+                fileName: req.file.originalname,
+                mimetype: req.file.mimetype,
+                size: req.file.size
+            };
         } else if (imageFileName) {
-            // This is a placeholder: in a real API, you'd have a secure way to map imageFileName to a server path
-            // For now, let's assume it might be a path relative to an 'uploads' folder for testing
-            // IMPORTANT: This part needs to be robust and secure in a production environment.
-            const tempImagePath = `./uploads/${imageFileName}`; // Example
-            try {
-                if (fs.existsSync(tempImagePath)) {
-                    imageFilePath = tempImagePath;
-                } else {
-                    console.warn(`Image file ${tempImagePath} not found. Proceeding without image.`);
-                }
-            } catch (err) {
-                console.warn(`Error checking for image file ${tempImagePath}: ${err.message}. Proceeding without image.`);
-            }
+            // Legacy support for imageFileName parameter (but no filesystem lookup)
+            console.warn(`[PumpController] imageFileName parameter provided but no file uploaded. Use multipart/form-data with 'image' field instead.`);
+            // We no longer support filesystem lookups for security and stateless operation
+        }
+        
+        if (!imageData) {
+            console.log(`[PumpController] No image provided. Proceeding with metadata-only token creation.`);
         }
 
         const result = await pumpService.createAndBuyService(
             tokenMetadata, 
-            imageFilePath, // Pass the resolved path
+            imageData, // Pass the image data object (buffer + metadata)
             buyAmountsSOL, 
             slippageBps
         );

@@ -1,7 +1,7 @@
 const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
-const fs = require('fs').promises;
-const path = require('path');
+const fs = require('fs').promises; // Still needed for LATEST_MINT_FILE operations
+const path = require('path'); // Still needed for LATEST_MINT_FILE path
 const { Keypair, SystemProgram, LAMPORTS_PER_SOL } = web3;
 const { 
     loadKeypairFromFile, 
@@ -55,10 +55,12 @@ async function checkWalletBalances(wallets, connection) {
  * Service to create a token and perform initial buys.
  * Based on 05-createTokenAndBuy.js
  * DevWallet creates. DevWallet + "First Bundled Wallet 1-4" (up to 4) buy in the same Jito bundle.
+ * 
+ * MONOCODE Compliance: Updated to handle image buffers from memory storage
  */
 async function createAndBuyService(
     tokenMetadata, // { name, symbol, description, twitter, telegram, website, showName }
-    imageFilePath, // Relative or absolute path to the image
+    imageData, // { buffer: Buffer, fileName: string, mimetype: string, size: number } or null
     buyAmountsSOL, // { devWalletBuySOL: 0.01, firstBundledWallet1BuySOL: 0.01, ... } up to 4 first bundled
     slippageBps = 2500 // Default 25% slippage (2500 basis points)
 ) {
@@ -131,10 +133,14 @@ async function createAndBuyService(
         }
 
         // 2. Metadata and IPFS Upload
+        // MONOCODE Compliance: Progressive Construction with memory-based image handling
         let imageBuffer, imageFileName;
-        if (imageFilePath) {
-            imageBuffer = await fs.readFile(imageFilePath);
-            imageFileName = path.basename(imageFilePath);
+        if (imageData && imageData.buffer) {
+            imageBuffer = imageData.buffer;
+            imageFileName = imageData.fileName;
+            console.log(`[PumpService] Using uploaded image: ${imageFileName} (${imageData.size} bytes, ${imageData.mimetype})`);
+        } else {
+            console.log(`[PumpService] No image provided. Creating token with metadata only.`);
         }
         results.metadataUri = await uploadMetadataToPumpPortal(tokenMetadata, imageBuffer, imageFileName);
         console.log(`Token metadata uploaded to IPFS: ${results.metadataUri}`);

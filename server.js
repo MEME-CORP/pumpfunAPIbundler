@@ -1,6 +1,7 @@
 const express = require('express');
 const walletController = require('./src/api/walletController');
 const pumpController = require('./src/api/pumpController'); // Require the new controller
+const uploadMiddleware = require('./src/middleware/uploadMiddleware'); // Upload middleware
 // const pumpController = require('./src/api/pumpController'); // Placeholder
 
 const app = express();
@@ -34,7 +35,7 @@ app.post('/api/wallets/fund-bundled', walletController.fundBundledWallets);
 app.post('/api/wallets/return-funds', walletController.returnFundsToMother);
 
 // --- Pump Portal Trading Routes ---
-app.post('/api/pump/create-and-buy', pumpController.createAndBuy);
+app.post('/api/pump/create-and-buy', uploadMiddleware, pumpController.createAndBuy);
 app.post('/api/pump/batch-buy', pumpController.batchBuy);
 app.post('/api/pump/sell-dev', pumpController.devSell);
 app.post('/api/pump/batch-sell', pumpController.batchSell);
