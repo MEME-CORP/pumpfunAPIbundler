@@ -194,7 +194,7 @@ The API now supports secure image uploads for token creation using multipart/for
     website: string (optional)
     showName: boolean (required)
     initialSupplyAmount: string (optional, default: "1000000000")
-    buyAmountsSOL: JSON string (required)
+    buyAmountsSOL: JSON string (required) - Must be valid JSON format
     slippageBps: number (optional, default: 2500)
     ```
   - **File Field:**
@@ -212,7 +212,13 @@ The API now supports secure image uploads for token creation using multipart/for
     -F "image=@/path/to/token-image.png"
   ```
 - **Response:** Mint address, bundle ID, transaction details, status.
-- **Note:** Images are processed in memory and streamed directly. No files are saved to disk.
+- **Important Notes:** 
+  - Images are processed in memory and streamed directly. No files are saved to disk.
+  - **buyAmountsSOL must be a valid JSON string** when using multipart/form-data (not a JavaScript object).
+  - **Minimum SOL Balance Requirements:**
+    - DevWallet (tipper): Requires **0.055 SOL** minimum + buy amount
+    - Other wallets: Require **0.025 SOL** minimum + buy amount
+    - Example: For a 0.01 SOL buy, DevWallet needs 0.065 SOL total, other wallets need 0.035 SOL total
 
 #### 2. Batch Buy Token
 - **POST** `/api/pump/batch-buy`
@@ -226,6 +232,7 @@ The API now supports secure image uploads for token creation using multipart/for
   }
   ```
 - **Response:** Bundle results, transaction details, status.
+- **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum + buy amount (tipper wallet needs 0.055 SOL minimum + buy amount)
 
 #### 3. DevWallet Sell
 - **POST** `/api/pump/sell-dev`
@@ -238,6 +245,7 @@ The API now supports secure image uploads for token creation using multipart/for
   }
   ```
 - **Response:** Bundle ID, transaction details, status.
+- **Minimum SOL Balance:** DevWallet needs **0.055 SOL** minimum to cover transaction fees and Jito tips
 
 #### 4. Batch Sell (All Non-DevWallets)
 - **POST** `/api/pump/batch-sell`
@@ -251,6 +259,7 @@ The API now supports secure image uploads for token creation using multipart/for
   }
   ```
 - **Response:** Bundle results, transaction details, status.
+- **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum (tipper wallet needs 0.055 SOL minimum)
 
 ---
 
@@ -261,6 +270,10 @@ The API now supports secure image uploads for token creation using multipart/for
 - All trading endpoints use robust transaction handling, Jito bundles, and follow Solana best practices for reliability.
 - Private keys are never returned by trading endpoints.
 - All transaction results include bundle IDs and transaction signatures for on-chain verification.
+- **Minimum SOL Balance Requirements:** All wallets must maintain minimum SOL balances to cover transaction fees and Jito tips:
+  - **DevWallet (tipper):** 0.055 SOL minimum + any buy/sell amounts
+  - **Other wallets:** 0.025 SOL minimum + any buy/sell amounts
+  - Insufficient balance will result in transaction failure with clear error messages.
 
 ---
 

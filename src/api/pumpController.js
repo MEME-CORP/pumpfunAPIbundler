@@ -16,9 +16,24 @@ async function createAndBuy(req, res) {
             showName, // boolean
             initialSupplyAmount, // string, e.g., "1000000000"
             imageFileName, // uploaded file name, server will map to a path
-            buyAmountsSOL, // e.g. { devWalletBuySOL: 0.01, firstBundledWallet1BuySOL: 0.01 }
             slippageBps // number, e.g. 2500 for 25%
         } = req.body;
+
+        // MONOCODE Compliance: Handle buyAmountsSOL parsing for multipart/form-data
+        // In multipart requests, JSON objects arrive as strings and need parsing
+        let { buyAmountsSOL } = req.body;
+        if (buyAmountsSOL && typeof buyAmountsSOL === 'string') {
+            try {
+                buyAmountsSOL = JSON.parse(buyAmountsSOL);
+                console.log(`[PumpController] Parsed buyAmountsSOL from multipart string:`, buyAmountsSOL);
+            } catch (parseError) {
+                console.error(`[PumpController] Failed to parse buyAmountsSOL JSON string:`, req.body.buyAmountsSOL);
+                return res.status(400).json({ 
+                    message: 'Invalid JSON format for buyAmountsSOL parameter.',
+                    error: 'INVALID_JSON_FORMAT'
+                });
+            }
+        }
 
         // --- Input Validation ---
         if (!name || !symbol || !description) {
