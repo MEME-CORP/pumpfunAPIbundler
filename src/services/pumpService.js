@@ -56,11 +56,12 @@ async function checkWalletBalances(wallets, connection) {
  * Based on 05-createTokenAndBuy.js
  * DevWallet creates. DevWallet + "First Bundled Wallet 1-4" (up to 4) buy in the same Jito bundle.
  * 
- * MONOCODE Compliance: Updated to handle image buffers from memory storage
+ * MONOCODE Compliance: Updated to handle image buffers and API-provided wallets
  */
 async function createAndBuyService(
     tokenMetadata, // { name, symbol, description, twitter, telegram, website, showName }
     imageData, // { buffer: Buffer, fileName: string, mimetype: string, size: number } or null
+    wallets, // Array of { name: string, privateKey: string } - API-provided wallets
     buyAmountsSOL, // { devWalletBuySOL: 0.01, firstBundledWallet1BuySOL: 0.01, ... } up to 4 first bundled
     slippageBps = 2500 // Default 25% slippage (2500 basis points)
 ) {
@@ -75,58 +76,70 @@ async function createAndBuyService(
     };
 
     try {
-        // 1. Load Wallets
-        const childWallets = await loadChildWalletsFromFile(CHILD_WALLETS_FILE);
-        if (!childWallets || childWallets.length === 0) {
-            throw new Error("No child wallets found. Please create them first.");
+        // 1. Load Wallets from API request (MONOCODE: Dependency Transparency)
+        console.log("[PumpService] Loading keypairs from API request...");
+        if (!wallets || wallets.length === 0) {
+            throw new Error("No wallets provided in the request.");
         }
 
-        const devWallet = childWallets.find(w => w.name === DEV_WALLET_NAME);
-        if (!devWallet) {
-            throw new Error("DevWallet not found in childWallets.json.");
-        }
-
-        const firstBundledWallets = [];
-        for (let i = 1; i <= MAX_BUYERS_IN_CREATE_BUNDLE; i++) {
-            const fbWallet = childWallets.find(w => w.name === `${FIRST_BUNDLED_BASE_NAME} ${i}`);
-            if (fbWallet && buyAmountsSOL[`firstBundledWallet${i}BuySOL`] > 0) {
-                firstBundledWallets.push(fbWallet);
+        const loadedWallets = [];
+        for (const wallet of wallets) {
+            try {
+                const keypair = Keypair.fromSecretKey(bs58.decode(wallet.privateKey));
+                loadedWallets.push({
+                    name: wallet.name,
+                    keypair,
+                    publicKey: keypair.publicKey.toBase58()
+                });
+            } catch (error) {
+                console.error(`Failed to decode private key for wallet "${wallet.name}":`, error);
+                throw new Error(`Invalid private key for wallet "${wallet.name}".`);
             }
         }
-        
-        const walletsForCreateAndBuy = [{ ...devWallet, isTipper: true }]; // DevWallet is always tipper for create
-        if (buyAmountsSOL.devWalletBuySOL > 0) { // If DevWallet is also buying
-             // No need to add again if it's just creating and buying
+
+        console.log(`[PumpService] Successfully loaded ${loadedWallets.length} wallets from API request`);
+
+        const devWallet = loadedWallets.find(w => w.name === DEV_WALLET_NAME);
+        if (!devWallet) {
+            throw new Error(`Creator wallet named "${DEV_WALLET_NAME}" must be provided in the wallets array.`);
         }
 
-        firstBundledWallets.forEach(fw => {
-            walletsForCreateAndBuy.push({ ...fw, isTipper: false }); // Subsequent buyers are not tippers
-        });
+        // Identify participating wallets based on buy amounts
+        const participatingWallets = [];
         
-        // Filter out duplicates if DevWallet is buying and creating (already added as tipper)
-        // The structure above should handle it, devWallet is added once as tipper.
-        // If devWallet buys, its buy tx is separate from create tx.
+        // Add DevWallet as tipper (for create transaction)
+        participatingWallets.push({ ...devWallet, isTipper: true });
 
-        const participatingWalletsForBalanceCheck = [{ ...devWallet, isTipper: true }]; // Tipper
-        if (buyAmountsSOL.devWalletBuySOL > 0) participatingWalletsForBalanceCheck.push({ ...devWallet, isTipper: false, isBuyer: true }); // Dev as buyer
-        firstBundledWallets.forEach(fw => {
-             if (buyAmountsSOL[`firstBundledWallet${firstBundledWallets.indexOf(fw)+1}BuySOL`] > 0) {
-                participatingWalletsForBalanceCheck.push({ ...fw, isTipper: false, isBuyer: true});
-             }
-        });
-        
+        // Add buyers based on buyAmountsSOL
+        if (buyAmountsSOL.devWalletBuySOL > 0) {
+            // DevWallet is both creator and buyer - already added as tipper
+        }
+
+        // Add first bundled wallets that are buying
+        for (let i = 1; i <= MAX_BUYERS_IN_CREATE_BUNDLE; i++) {
+            const buyKey = `firstBundledWallet${i}BuySOL`;
+            if (buyAmountsSOL[buyKey] > 0) {
+                const walletName = `${FIRST_BUNDLED_BASE_NAME} ${i}`;
+                const wallet = loadedWallets.find(w => w.name === walletName);
+                if (wallet) {
+                    participatingWallets.push({ ...wallet, isTipper: false });
+                } else {
+                    throw new Error(`Wallet "${walletName}" not found in provided wallets array but is required for buying.`);
+                }
+            }
+        }
+
         // Deduplicate for balance check (important if DevWallet is both creator and buyer)
-        const uniqueWalletsForBalanceCheck = participatingWalletsForBalanceCheck.reduce((acc, current) => {
-            const x = acc.find(item => item.publicKey === current.publicKey);
-            if (!x) {
+        const uniqueWalletsForBalanceCheck = participatingWallets.reduce((acc, current) => {
+            const existing = acc.find(item => item.publicKey === current.publicKey);
+            if (!existing) {
                 return acc.concat([current]);
             } else {
-                 // If already present, make sure 'isTipper' is true if one of them is a tipper
-                if (current.isTipper) x.isTipper = true;
+                // If already present, make sure 'isTipper' is true if one of them is a tipper
+                if (current.isTipper) existing.isTipper = true;
                 return acc;
             }
         }, []);
-
 
         if (!await checkWalletBalances(uniqueWalletsForBalanceCheck, connection)) {
             throw new Error("Insufficient SOL balance in one or more participating wallets.");
@@ -172,18 +185,22 @@ async function createAndBuyService(
         });
         walletSignerMap.push({ wallet: devWallet, isCreate: true });
 
-
         // Tx 2+: Buys (DevWallet if applicable, then First Bundled Wallets)
         const buyers = [];
         if (buyAmountsSOL.devWalletBuySOL > 0) {
             buyers.push({ wallet: devWallet, buySOL: buyAmountsSOL.devWalletBuySOL });
         }
-        firstBundledWallets.forEach((fw, index) => {
-            const buySolKey = `firstBundledWallet${index+1}BuySOL`;
-            if (buyAmountsSOL[buySolKey] > 0) {
-                 buyers.push({ wallet: fw, buySOL: buyAmountsSOL[buySolKey]});
+        
+        for (let i = 1; i <= MAX_BUYERS_IN_CREATE_BUNDLE; i++) {
+            const buyKey = `firstBundledWallet${i}BuySOL`;
+            if (buyAmountsSOL[buyKey] > 0) {
+                const walletName = `${FIRST_BUNDLED_BASE_NAME} ${i}`;
+                const wallet = loadedWallets.find(w => w.name === walletName);
+                if (wallet) {
+                    buyers.push({ wallet: wallet, buySOL: buyAmountsSOL[buyKey] });
+                }
             }
-        });
+        }
         
         if (buyers.length + bundledTxArgs.length > 5) { // +1 for the create transaction
              throw new Error(`Too many transactions for a single Jito bundle. Max 5. Requested: ${buyers.length + 1}`);

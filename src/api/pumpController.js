@@ -19,9 +19,10 @@ async function createAndBuy(req, res) {
             slippageBps // number, e.g. 2500 for 25%
         } = req.body;
 
-        // MONOCODE Compliance: Handle buyAmountsSOL parsing for multipart/form-data
-        // In multipart requests, JSON objects arrive as strings and need parsing
-        let { buyAmountsSOL } = req.body;
+        // MONOCODE Compliance: Handle multipart/form-data parsing for JSON fields
+        // In multipart requests, JSON objects and arrays arrive as strings and need parsing
+        let { buyAmountsSOL, wallets } = req.body;
+        
         if (buyAmountsSOL && typeof buyAmountsSOL === 'string') {
             try {
                 buyAmountsSOL = JSON.parse(buyAmountsSOL);
@@ -30,6 +31,19 @@ async function createAndBuy(req, res) {
                 console.error(`[PumpController] Failed to parse buyAmountsSOL JSON string:`, req.body.buyAmountsSOL);
                 return res.status(400).json({ 
                     message: 'Invalid JSON format for buyAmountsSOL parameter.',
+                    error: 'INVALID_JSON_FORMAT'
+                });
+            }
+        }
+
+        if (wallets && typeof wallets === 'string') {
+            try {
+                wallets = JSON.parse(wallets);
+                console.log(`[PumpController] Parsed wallets from multipart string - count: ${wallets.length}`);
+            } catch (parseError) {
+                console.error(`[PumpController] Failed to parse wallets JSON string:`, req.body.wallets);
+                return res.status(400).json({ 
+                    message: 'Invalid JSON format for wallets parameter.',
                     error: 'INVALID_JSON_FORMAT'
                 });
             }
@@ -44,6 +58,16 @@ async function createAndBuy(req, res) {
         }
         if (typeof showName === 'undefined') {
              return res.status(400).json({ message: 'showName (boolean) is required.'});
+        }
+        if (!wallets || !Array.isArray(wallets) || wallets.length === 0) {
+            return res.status(400).json({ message: 'A non-empty array of wallets (with name and privateKey) is required.' });
+        }
+
+        // Validate wallet structure
+        for (const wallet of wallets) {
+            if (!wallet.name || !wallet.privateKey) {
+                return res.status(400).json({ message: 'Each wallet must have a name and privateKey.' });
+            }
         }
 
         const tokenMetadata = { name, symbol, description, twitter, telegram, website, showName, initialSupplyAmount };
@@ -74,6 +98,7 @@ async function createAndBuy(req, res) {
         const result = await pumpService.createAndBuyService(
             tokenMetadata, 
             imageData, // Pass the image data object (buffer + metadata)
+            wallets, // Pass the wallets array instead of loading from file
             buyAmountsSOL, 
             slippageBps
         );

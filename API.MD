@@ -4,6 +4,12 @@
 
 This API provides endpoints for managing Solana wallets and interacting with the Pump.fun platform, including token creation, batch buying, and batch selling using Jito bundles. It is built with Node.js, Express, and Solana's `@solana/web3.js` library, and follows best practices for transaction reliability and security.
 
+**Key Features:**
+- **Stateless Operation:** All wallet credentials are provided via API requests, not stored on server
+- **Memory-based Image Processing:** Images are processed in RAM for maximum security and scalability
+- **Jito Bundle Integration:** Optimized for MEV protection and transaction reliability
+- **Render-Compatible:** Fully compatible with ephemeral container deployments
+
 ---
 
 ## Core Endpoints
@@ -195,6 +201,7 @@ The API now supports secure image uploads for token creation using multipart/for
     showName: boolean (required)
     initialSupplyAmount: string (optional, default: "1000000000")
     buyAmountsSOL: JSON string (required) - Must be valid JSON format
+    wallets: JSON string (required) - Array of wallet objects with name and privateKey
     slippageBps: number (optional, default: 2500)
     ```
   - **File Field:**
@@ -209,12 +216,18 @@ The API now supports secure image uploads for token creation using multipart/for
     -F "description=A great token" \
     -F "showName=true" \
     -F "buyAmountsSOL={\"devWalletBuySOL\":0.01,\"firstBundledWallet1BuySOL\":0.01}" \
+    -F "wallets=[{\"name\":\"DevWallet\",\"privateKey\":\"base58_private_key_here\"},{\"name\":\"First Bundled Wallet 1\",\"privateKey\":\"base58_private_key_here\"}]" \
     -F "image=@/path/to/token-image.png"
   ```
 - **Response:** Mint address, bundle ID, transaction details, status.
 - **Important Notes:** 
   - Images are processed in memory and streamed directly. No files are saved to disk.
   - **buyAmountsSOL must be a valid JSON string** when using multipart/form-data (not a JavaScript object).
+  - **wallets must be a valid JSON string** containing an array of wallet objects with `name` and `privateKey` properties.
+  - **Required Wallet Names:**
+    - Must include `"DevWallet"` as the creator wallet
+    - Buying wallets should be named `"First Bundled Wallet 1"`, `"First Bundled Wallet 2"`, etc.
+    - Private keys must be base58 encoded Solana keypairs
   - **Minimum SOL Balance Requirements:**
     - DevWallet (tipper): Requires **0.055 SOL** minimum + buy amount
     - Other wallets: Require **0.025 SOL** minimum + buy amount
