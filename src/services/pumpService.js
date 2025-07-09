@@ -21,6 +21,9 @@ const {
 } = require('../utils/pumpAndJitoUtils');
 const { sendJitoBundleWithRetries, pollBundleStatus, sleep, getRecentBlockhash } = require('../utils/transactionUtils');
 
+// MONOCODE Compliance: Fix bs58 decoder compatibility issue
+const bs58Decoder = bs58.default || bs58;
+
 const DEV_WALLET_NAME = "DevWallet";
 const FIRST_BUNDLED_BASE_NAME = "First Bundled Wallet";
 const MAX_BUYERS_IN_CREATE_BUNDLE = 4; // DevWallet + 4 First Bundled Wallets = 5 TXs max for create bundle
@@ -85,7 +88,7 @@ async function createAndBuyService(
         const loadedWallets = [];
         for (const wallet of wallets) {
             try {
-                const keypair = Keypair.fromSecretKey(bs58.decode(wallet.privateKey));
+                const keypair = Keypair.fromSecretKey(bs58Decoder.decode(wallet.privateKey));
                 loadedWallets.push({
                     name: wallet.name,
                     keypair,
