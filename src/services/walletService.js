@@ -5,6 +5,9 @@ const { sendAndConfirmTransactionRobustly, sleep } = require('../utils/transacti
 // PHASE 2: Enhanced SPL Token Balance Support
 const { getTokenBalance, getAllTokenBalances, getWalletSummary, getFormattedTokenBalance, hasTokens } = require('../utils/solanaUtils');
 
+// MONOCODE Compliance: Fix bs58 decoder compatibility issue
+const bs58Decoder = bs58.default || bs58;
+
 const MOTHER_WALLET_FILE = 'motherWallet.json';
 const CHILD_WALLETS_FILE = 'childWallets.json';
 const SOL_TO_LEAVE_FOR_FEES = 0.00002; // Small amount of SOL to leave in child wallets for future tx fees if any
@@ -19,7 +22,7 @@ async function createOrImportMotherWalletService(privateKeyBs58) {
     const walletName = "MotherAirdropWallet";
     if (privateKeyBs58) {
         try {
-            const secretKey = bs58.decode(privateKeyBs58);
+            const secretKey = bs58Decoder.decode(privateKeyBs58);
             if (secretKey.length !== 64) {
                 throw new Error('Invalid private key length. Must be 64 bytes for a Solana keypair.');
             }
@@ -74,7 +77,8 @@ async function createBundledWalletsService(count, devWalletName = "DevWallet", f
 
 /**
  * Imports Bundled (Child) Wallets from an array of private keys.
- * @param {Array<{name: string, privateKeyBs58: string}>} walletImportData - Array of objects with name and privateKeyBs58.
+ * MONOCODE Compliance: Enhanced flexibility to accept both privateKey and privateKeyBs58 field names
+ * @param {Array<{name: string, privateKeyBs58?: string, privateKey?: string}>} walletImportData - Array of objects with name and privateKeyBs58 or privateKey.
  * @returns {Promise<Array<object>>} Array of imported wallet details [{ name, publicKey, privateKey }].
  */
 async function importBundledWalletsService(walletImportData) {
@@ -83,12 +87,18 @@ async function importBundledWalletsService(walletImportData) {
     }
 
     const childWallets = [];
-    for (const { name, privateKeyBs58 } of walletImportData) {
-        if (!name || !privateKeyBs58) {
-            throw new Error('Each wallet import entry must have a name and a privateKeyBs58.');
+    for (const walletData of walletImportData) {
+        const { name, privateKeyBs58, privateKey } = walletData;
+        
+        // MONOCODE Compliance: Flexible field name handling for better API compatibility
+        const privateKeyValue = privateKeyBs58 || privateKey;
+        
+        if (!name || !privateKeyValue) {
+            throw new Error('Each wallet import entry must have a name and a privateKeyBs58 (or privateKey).');
         }
+        
         try {
-            const secretKey = bs58.decode(privateKeyBs58);
+            const secretKey = bs58Decoder.decode(privateKeyValue);
             if (secretKey.length !== 64) {
                 throw new Error(`Invalid private key length for wallet ${name}. Must be 64 bytes.`);
             }
@@ -128,7 +138,7 @@ async function fundChildWalletsService(amountPerWalletSOL, targetWalletNames, mo
     let motherWallet;
     if (motherWalletPrivateKeyBs58) {
         try {
-            const secretKey = bs58.decode(motherWalletPrivateKeyBs58);
+            const secretKey = bs58Decoder.decode(motherWalletPrivateKeyBs58);
             motherWallet = web3.Keypair.fromSecretKey(secretKey);
         } catch (e) {
             throw new Error('Invalid mother wallet private key for funding.');

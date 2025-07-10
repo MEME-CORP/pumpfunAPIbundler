@@ -29,7 +29,9 @@ This API provides endpoints for managing Solana wallets and interacting with the
 #### 3. Import Bundled (Child) Wallets
 - **POST** `/api/wallets/bundled/import`
 - **Body:** `{ "wallets": [ { "name": "...", "privateKey": "<base58>" }, ... ] }`
+- **Alternative Body:** `{ "wallets": [ { "name": "...", "privateKeyBs58": "<base58>" }, ... ] }`
 - **Response:** List of imported wallets.
+- **Note:** Both `privateKey` and `privateKeyBs58` field names are accepted for flexibility.
 
 #### 4. Fund Bundled Wallets
 - **POST** `/api/wallets/fund-bundled`
