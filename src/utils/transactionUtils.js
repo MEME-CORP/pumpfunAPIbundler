@@ -332,6 +332,7 @@ function calculateTransactionFee(priorityFeeMicrolamports = 100000, computeUnitL
  * Enhanced transaction sender with ADVANCED confirmation and smart fallback
  * Uses WebSocket-based confirmation with polling fallback to avoid rate limits
  * Includes duplicate transaction prevention based on research findings
+ * MONOCODE Compliance: Fixed insufficient funds detection and improved error handling
  * @param {web3.Connection} connection - Solana connection object.
  * @param {web3.Transaction} transaction - The transaction to send.
  * @param {web3.Signer[]} signers - Array of signers for the transaction.
@@ -424,9 +425,15 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
             console.warn(`[TransactionUtils] ❌ Attempt ${retries + 1} failed: ${error.message}`);
             retries++;
             
-            // Handle specific error types with appropriate responses
-            if (error.message.includes('insufficient funds') || error.message.includes('Insufficient funds')) {
-                console.error(`[TransactionUtils] 💰 Insufficient funds - stopping all retries`);
+            // MONOCODE Compliance: Enhanced error handling for insufficient funds
+            // Check for multiple variations of insufficient funds errors including custom program error 1
+            if (error.message.includes('insufficient funds') || 
+                error.message.includes('Insufficient funds') ||
+                error.message.includes('insufficient lamports') ||
+                error.message.includes('custom program error: 0x1') ||
+                error.message.includes('custom program error: 1')) {
+                console.error(`[TransactionUtils] 💰 Insufficient funds detected - stopping all retries`);
+                console.error(`[TransactionUtils] Error details: ${error.message}`);
                 throw error;
             }
             

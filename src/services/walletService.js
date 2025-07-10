@@ -1,7 +1,7 @@
 const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
 const { saveKeypairToFile, loadKeypairFromFile, loadChildWalletsFromFile, saveChildWalletsToFile, getWalletBalance, getSolanaConnection, WALLETS_DIR } = require('../utils/walletUtils');
-const { sendAndConfirmTransactionRobustly, sleep } = require('../utils/transactionUtils');
+const { sendAndConfirmTransactionRobustly, sleep, calculateTransactionFee } = require('../utils/transactionUtils');
 // PHASE 2: Enhanced SPL Token Balance Support
 const { getTokenBalance, getAllTokenBalances, getWalletSummary, getFormattedTokenBalance, hasTokens } = require('../utils/solanaUtils');
 
@@ -10,7 +10,8 @@ const bs58Decoder = bs58.default || bs58;
 
 const MOTHER_WALLET_FILE = 'motherWallet.json';
 const CHILD_WALLETS_FILE = 'childWallets.json';
-const SOL_TO_LEAVE_FOR_FEES = 0.00002; // Small amount of SOL to leave in child wallets for future tx fees if any
+// MONOCODE Compliance: More accurate fee calculation including priority fees  
+const SOL_TO_LEAVE_FOR_FEES = 0.0001; // More conservative amount for transaction fees (100,000 lamports)
 
 /**
  * Creates a new Airdrop (Mother) wallet or imports an existing one.
@@ -166,9 +167,17 @@ async function fundChildWalletsService(amountPerWalletSOL, targetWalletNames, mo
     }
 
     const lamportsToSend = amountPerWalletSOL * web3.LAMPORTS_PER_SOL;
-    const totalSOLNeeded = amountPerWalletSOL * walletsToFund.length + (0.000005 * walletsToFund.length); // Rough fee estimate
+    
+    // MONOCODE Compliance: More accurate fee calculation
+    const estimatedFeePerTx = calculateTransactionFee(100000, 200000);
+    const estimatedFeeSOLPerTx = estimatedFeePerTx / web3.LAMPORTS_PER_SOL;
+    const totalFees = estimatedFeeSOLPerTx * walletsToFund.length * 1.2; // 20% buffer
+    const totalSOLNeeded = (amountPerWalletSOL * walletsToFund.length) + totalFees;
+    
+    console.log(`[WalletService] Fund calculation: ${amountPerWalletSOL} SOL x ${walletsToFund.length} wallets + ${totalFees.toFixed(6)} SOL fees = ${totalSOLNeeded.toFixed(6)} SOL total`);
+    
     if (motherBalance < totalSOLNeeded) {
-        throw new Error(`Insufficient SOL in mother wallet. Needs ~${totalSOLNeeded.toFixed(6)}, has ${motherBalance.toFixed(6)}.`);
+        throw new Error(`Insufficient SOL in mother wallet. Needs ${totalSOLNeeded.toFixed(6)} SOL (${(amountPerWalletSOL * walletsToFund.length).toFixed(6)} for transfers + ${totalFees.toFixed(6)} for fees), has ${motherBalance.toFixed(6)} SOL.`);
     }
 
     const results = [];
@@ -182,7 +191,12 @@ async function fundChildWalletsService(amountPerWalletSOL, targetWalletNames, mo
             })
         );
         try {
-            const signature = await sendAndConfirmTransactionRobustly(connection, transaction, [motherWallet], { skipPreflight: true });
+            const signature = await sendAndConfirmTransactionRobustly(connection, transaction, [motherWallet], { 
+                skipPreflight: true,
+                priorityFeeMicrolamports: 100000,
+                computeUnitLimit: 200000,
+                commitment: 'confirmed'
+            });
             const balanceAfter = await getWalletBalance(connection, new web3.PublicKey(child.publicKey));
             results.push({ 
                 name: child.name, 
@@ -237,12 +251,21 @@ async function returnFundsToMotherWalletService(motherWalletPublicKeyBs58, sourc
 
         try {
             balanceBefore = await getWalletBalance(connection, childPublicKey);
-            if (balanceBefore <= SOL_TO_LEAVE_FOR_FEES) {
-                console.log(`${child.name} (${child.publicKey}) has insufficient balance (${balanceBefore} SOL) to return funds. Skipping.`);
+            
+            // MONOCODE Compliance: Calculate accurate transaction fees including priority fees
+            const estimatedFee = calculateTransactionFee(100000, 200000); // Priority fee + compute units
+            const estimatedFeeSOL = estimatedFee / web3.LAMPORTS_PER_SOL;
+            const totalFeeReserve = Math.max(SOL_TO_LEAVE_FOR_FEES, estimatedFeeSOL * 1.5); // 50% buffer
+            
+            console.log(`${child.name} balance: ${balanceBefore} SOL, estimated fee: ${estimatedFeeSOL} SOL, reserve: ${totalFeeReserve} SOL`);
+            
+            if (balanceBefore <= totalFeeReserve) {
+                console.log(`${child.name} (${child.publicKey}) has insufficient balance (${balanceBefore} SOL) to cover fees (${totalFeeReserve} SOL). Skipping.`);
                 results.push({ name: child.name, publicKey: child.publicKey, status: 'skipped_low_balance', amountReturned: 0, balanceAfter: balanceBefore });
                 continue;
             }
-            amountToReturnLamports = Math.floor((balanceBefore - SOL_TO_LEAVE_FOR_FEES) * web3.LAMPORTS_PER_SOL);
+            
+            amountToReturnLamports = Math.floor((balanceBefore - totalFeeReserve) * web3.LAMPORTS_PER_SOL);
             
             if (amountToReturnLamports <= 0) {
                  console.log(`${child.name} (${child.publicKey}) balance after leaving fees is too low (${amountToReturnLamports} lamports). Skipping.`);
@@ -258,7 +281,12 @@ async function returnFundsToMotherWalletService(motherWalletPublicKeyBs58, sourc
                     lamports: amountToReturnLamports,
                 })
             );
-            signature = await sendAndConfirmTransactionRobustly(connection, transaction, [childKeypair], { skipPreflight: true });
+            signature = await sendAndConfirmTransactionRobustly(connection, transaction, [childKeypair], { 
+                skipPreflight: true,
+                priorityFeeMicrolamports: 100000,
+                computeUnitLimit: 200000,
+                commitment: 'confirmed'
+            });
             status = 'success';
             console.log(`Successfully returned SOL from ${child.name}. Tx: ${signature}`);
         } catch (error) {

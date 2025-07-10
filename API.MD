@@ -288,6 +288,9 @@ The API now supports secure image uploads for token creation using multipart/for
 - **Minimum SOL Balance Requirements:** All wallets must maintain minimum SOL balances to cover transaction fees and Jito tips:
   - **DevWallet (tipper):** 0.055 SOL minimum + any buy/sell amounts
   - **Other wallets:** 0.025 SOL minimum + any buy/sell amounts
+  - **Wallet Management Operations:** 0.0001 SOL minimum reserve for transaction fees
+  - **Enhanced Fee Calculation:** Uses precise priority fee calculation (base 5,000 + priority ~20,000 lamports = ~25,000 lamports total)
+  - **Insufficient Balance Detection:** Enhanced error handling detects "custom program error: 1" and other insufficient funds variations
   - Insufficient balance will result in transaction failure with clear error messages.
 
 ---
@@ -309,6 +312,8 @@ The API now supports secure image uploads for token creation using multipart/for
   - *Expected:* Returns list of wallets, with correct naming.
 - **Funding and returning funds works.**
   - *Expected:* SOL is transferred, balances update, transaction signatures are valid.
+  - *Expected:* Proper fee calculation prevents insufficient funds errors.
+  - *Expected:* Enhanced error detection provides clear feedback for balance issues.
 - **Enhanced wallet balance queries work for all endpoints.**
   - *Expected:* Returns correct SOL balance, SPL token balances, and complete wallet summaries.
 
@@ -353,8 +358,13 @@ The API now supports secure image uploads for token creation using multipart/for
 ## Error Handling
 
 - **Invalid mint addresses, wallet names, or percentages are rejected with clear errors.**
-- **Insufficient balances are detected and reported.**
+- **Insufficient balances are detected and reported with enhanced error detection:**
+  - Detects "custom program error: 1" (insufficient lamports)
+  - Detects "insufficient funds" and "Insufficient funds" variations
+  - Detects "insufficient lamports" errors
+  - Provides detailed logging for debugging
 - **Network or RPC errors are handled gracefully and reported.**
+- **Transaction fee calculation errors are prevented through accurate fee estimation.**
 
 ## On-Chain Verification
 
@@ -369,6 +379,7 @@ The API now supports secure image uploads for token creation using multipart/for
 - **Edge cases (e.g., 0%/100% sell, missing wallets, duplicate wallet names).**
 - **Batching logic (correct number of transactions per bundle, correct tipper).**
 - **Minimum SOL balance enforcement for tippers and non-tippers.**
+- **Accurate transaction fee calculation and insufficient funds prevention.**
 - **Robustness under network/RPC errors (simulate failures if possible).**
 - **Correctness of returned data (mint address, bundle IDs, transaction signatures).**
 - **No sensitive data leakage.**
