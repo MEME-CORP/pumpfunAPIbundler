@@ -168,20 +168,20 @@ async function fundChildWalletsService(amountPerWalletSOL, targetWalletNames, mo
 
     const lamportsToSend = amountPerWalletSOL * web3.LAMPORTS_PER_SOL;
     
-    // MONOCODE Compliance: Enhanced fee calculation including potential rent requirements
-    // Calculate costs for basic transfer transactions (no account creation expected for simple funding)
+    // MONOCODE Compliance: Enhanced fee calculation including rent exemption requirements
+    // Calculate costs for transfer transactions, accounting for future token operations
     const costPerTransaction = calculateTransactionCostWithRent({
         priorityFeeMicrolamports: 100000,
         computeUnitLimit: 200000,
-        accountTypesToCreate: [], // Basic SOL transfers don't create new accounts
-        includeRentBuffer: false // No rent needed for basic transfers
+        accountTypesToCreate: ['token'], // Account for potential future token account creation
+        includeRentBuffer: true // Include rent exemption requirements
     });
     
     const totalFees = costPerTransaction.summary.transactionFeeSOL * walletsToFund.length * 1.2; // 20% buffer
     const totalSOLNeeded = (amountPerWalletSOL * walletsToFund.length) + totalFees;
     
     console.log(`[WalletService] Fund calculation: ${amountPerWalletSOL} SOL x ${walletsToFund.length} wallets + ${totalFees.toFixed(6)} SOL fees = ${totalSOLNeeded.toFixed(6)} SOL total`);
-    console.log(`[WalletService] Note: Recipients should maintain additional balance for token operations that may require rent exemption (~0.00204 SOL per token account)`);
+    console.log(`[WalletService] Note: Each recipient will maintain ${costPerTransaction.summary.totalRentRequiredSOL.toFixed(8)} SOL rent exemption + ${costPerTransaction.summary.rentBufferSOL.toFixed(8)} SOL buffer for token operations`);
     
     if (motherBalance < totalSOLNeeded) {
         throw new Error(`Insufficient SOL in mother wallet. Needs ${totalSOLNeeded.toFixed(6)} SOL (${(amountPerWalletSOL * walletsToFund.length).toFixed(6)} for transfers + ${totalFees.toFixed(6)} for fees), has ${motherBalance.toFixed(6)} SOL.`);
@@ -259,31 +259,33 @@ async function returnFundsToMotherWalletService(motherWalletPublicKeyBs58, sourc
         try {
             balanceBefore = await getWalletBalance(connection, childPublicKey);
             
-            // MONOCODE Compliance: Calculate accurate transaction fees including priority fees
-            // For return funds, we only need transaction fees (no rent for basic transfers)
+            // MONOCODE Compliance: Calculate accurate transaction fees INCLUDING rent exemption requirements
+            // For return funds, we need to account for future token operations that may require rent exemption
             const costCalculation = calculateTransactionCostWithRent({
                 priorityFeeMicrolamports: 100000,
                 computeUnitLimit: 200000,
-                accountTypesToCreate: [], // Basic SOL transfers don't create accounts
-                includeRentBuffer: false
+                accountTypesToCreate: ['token'], // Account for potential future token account creation
+                includeRentBuffer: true // Include rent exemption requirements
             });
             
             const estimatedFeeSOL = costCalculation.summary.transactionFeeSOL;
-            const totalFeeReserve = Math.max(SOL_TO_LEAVE_FOR_FEES, estimatedFeeSOL * 1.5); // 50% buffer
+            const rentExemptionSOL = costCalculation.summary.totalRentRequiredSOL;
+            const rentBufferSOL = costCalculation.summary.rentBufferSOL;
+            const totalReserveNeeded = Math.max(SOL_TO_LEAVE_FOR_FEES, estimatedFeeSOL + rentExemptionSOL + rentBufferSOL);
             
-            console.log(`${child.name} balance: ${balanceBefore} SOL, estimated fee: ${estimatedFeeSOL} SOL, reserve: ${totalFeeReserve} SOL`);
+            console.log(`${child.name} balance: ${balanceBefore} SOL, fee: ${estimatedFeeSOL} SOL, rent exemption: ${rentExemptionSOL} SOL, buffer: ${rentBufferSOL} SOL, total reserve: ${totalReserveNeeded} SOL`);
             
-            if (balanceBefore <= totalFeeReserve) {
-                console.log(`${child.name} (${child.publicKey}) has insufficient balance (${balanceBefore} SOL) to cover fees (${totalFeeReserve} SOL). Skipping.`);
+            if (balanceBefore <= totalReserveNeeded) {
+                console.log(`${child.name} (${child.publicKey}) has insufficient balance (${balanceBefore} SOL) to cover fees and rent exemption (${totalReserveNeeded} SOL). Skipping.`);
                 results.push({ name: child.name, publicKey: child.publicKey, status: 'skipped_low_balance', amountReturned: 0, balanceAfter: balanceBefore });
                 continue;
             }
             
-            amountToReturnLamports = Math.floor((balanceBefore - totalFeeReserve) * web3.LAMPORTS_PER_SOL);
+            amountToReturnLamports = Math.floor((balanceBefore - totalReserveNeeded) * web3.LAMPORTS_PER_SOL);
             
             if (amountToReturnLamports <= 0) {
-                 console.log(`${child.name} (${child.publicKey}) balance after leaving fees is too low (${amountToReturnLamports} lamports). Skipping.`);
-                 results.push({ name: child.name, publicKey: child.publicKey, status: 'skipped_low_after_fees', amountReturned: 0, balanceAfter: balanceBefore });
+                 console.log(`${child.name} (${child.publicKey}) balance after leaving fees and rent exemption is too low (${amountToReturnLamports} lamports). Skipping.`);
+                 results.push({ name: child.name, publicKey: child.publicKey, status: 'skipped_low_after_reserves', amountReturned: 0, balanceAfter: balanceBefore });
                  continue;
             }
 

@@ -37,11 +37,13 @@ This API provides endpoints for managing Solana wallets and interacting with the
 - **POST** `/api/wallets/fund-bundled`
 - **Body:** `{ "amountPerWallet": <number> }`
 - **Response:** Transaction results for each wallet.
+- **Note:** Mother wallet must have sufficient balance to cover transfers plus rent exemption requirements for token operations.
 
 #### 5. Return Funds to Mother Wallet
 - **POST** `/api/wallets/return-funds`
 - **Body:** `{ "leaveDust": <boolean> }`
 - **Response:** Transaction results for each wallet.
+- **Note:** Automatically preserves rent exemption amounts (~0.00204 SOL) in each wallet for future token operations.
 
 #### 6. Get Wallet Balance (Enhanced SPL Token Support)
 
@@ -288,9 +290,10 @@ The API now supports secure image uploads for token creation using multipart/for
 - **Minimum SOL Balance Requirements:** All wallets must maintain minimum SOL balances to cover transaction fees, Jito tips, and rent exemption:
   - **DevWallet (tipper):** 0.055 SOL minimum + any buy/sell amounts + 0.00204 SOL rent exemption
   - **Other wallets:** 0.025 SOL minimum + any buy/sell amounts + 0.00204 SOL rent exemption
-  - **Wallet Management Operations:** 0.0001 SOL minimum reserve for transaction fees
+  - **Wallet Management Operations:** Automatically accounts for rent exemption requirements when funding/returning funds
   - **Enhanced Fee Calculation:** Uses precise priority fee calculation (base 5,000 + priority ~20,000 lamports = ~25,000 lamports total)
   - **Rent Exemption:** 0.00203928 SOL (2,039,280 lamports) for Associated Token Account (ATA) creation
+  - **Automatic Rent Preservation:** Fund and return operations automatically preserve rent exemption amounts
   - **Insufficient Balance Detection:** Enhanced error handling detects "custom program error: 1", "Insufficient Funds For Rent", and other insufficient funds variations
   - Insufficient balance will result in transaction failure with clear error messages.
 
