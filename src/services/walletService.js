@@ -1,7 +1,7 @@
 const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
 const { saveKeypairToFile, loadKeypairFromFile, loadChildWalletsFromFile, saveChildWalletsToFile, getWalletBalance, getSolanaConnection, WALLETS_DIR } = require('../utils/walletUtils');
-const { sendAndConfirmTransactionRobustly, sleep, calculateTransactionFee } = require('../utils/transactionUtils');
+const { sendAndConfirmTransactionRobustly, sleep, calculateTransactionFee, calculateTransactionCostWithRent, validateBalanceForRentOperations, getRentExemptionForAccountType } = require('../utils/transactionUtils');
 // PHASE 2: Enhanced SPL Token Balance Support
 const { getTokenBalance, getAllTokenBalances, getWalletSummary, getFormattedTokenBalance, hasTokens } = require('../utils/solanaUtils');
 
@@ -168,13 +168,20 @@ async function fundChildWalletsService(amountPerWalletSOL, targetWalletNames, mo
 
     const lamportsToSend = amountPerWalletSOL * web3.LAMPORTS_PER_SOL;
     
-    // MONOCODE Compliance: More accurate fee calculation
-    const estimatedFeePerTx = calculateTransactionFee(100000, 200000);
-    const estimatedFeeSOLPerTx = estimatedFeePerTx / web3.LAMPORTS_PER_SOL;
-    const totalFees = estimatedFeeSOLPerTx * walletsToFund.length * 1.2; // 20% buffer
+    // MONOCODE Compliance: Enhanced fee calculation including potential rent requirements
+    // Calculate costs for basic transfer transactions (no account creation expected for simple funding)
+    const costPerTransaction = calculateTransactionCostWithRent({
+        priorityFeeMicrolamports: 100000,
+        computeUnitLimit: 200000,
+        accountTypesToCreate: [], // Basic SOL transfers don't create new accounts
+        includeRentBuffer: false // No rent needed for basic transfers
+    });
+    
+    const totalFees = costPerTransaction.summary.transactionFeeSOL * walletsToFund.length * 1.2; // 20% buffer
     const totalSOLNeeded = (amountPerWalletSOL * walletsToFund.length) + totalFees;
     
     console.log(`[WalletService] Fund calculation: ${amountPerWalletSOL} SOL x ${walletsToFund.length} wallets + ${totalFees.toFixed(6)} SOL fees = ${totalSOLNeeded.toFixed(6)} SOL total`);
+    console.log(`[WalletService] Note: Recipients should maintain additional balance for token operations that may require rent exemption (~0.00204 SOL per token account)`);
     
     if (motherBalance < totalSOLNeeded) {
         throw new Error(`Insufficient SOL in mother wallet. Needs ${totalSOLNeeded.toFixed(6)} SOL (${(amountPerWalletSOL * walletsToFund.length).toFixed(6)} for transfers + ${totalFees.toFixed(6)} for fees), has ${motherBalance.toFixed(6)} SOL.`);
@@ -253,8 +260,15 @@ async function returnFundsToMotherWalletService(motherWalletPublicKeyBs58, sourc
             balanceBefore = await getWalletBalance(connection, childPublicKey);
             
             // MONOCODE Compliance: Calculate accurate transaction fees including priority fees
-            const estimatedFee = calculateTransactionFee(100000, 200000); // Priority fee + compute units
-            const estimatedFeeSOL = estimatedFee / web3.LAMPORTS_PER_SOL;
+            // For return funds, we only need transaction fees (no rent for basic transfers)
+            const costCalculation = calculateTransactionCostWithRent({
+                priorityFeeMicrolamports: 100000,
+                computeUnitLimit: 200000,
+                accountTypesToCreate: [], // Basic SOL transfers don't create accounts
+                includeRentBuffer: false
+            });
+            
+            const estimatedFeeSOL = costCalculation.summary.transactionFeeSOL;
             const totalFeeReserve = Math.max(SOL_TO_LEAVE_FOR_FEES, estimatedFeeSOL * 1.5); // 50% buffer
             
             console.log(`${child.name} balance: ${balanceBefore} SOL, estimated fee: ${estimatedFeeSOL} SOL, reserve: ${totalFeeReserve} SOL`);
@@ -619,6 +633,114 @@ async function getFormattedTokenBalanceService(publicKeyString, mintAddress) {
 }
 
 
+/**
+ * Validates wallet balances for operations that may create token accounts
+ * MONOCODE Compliance: Enhanced balance validation with rent exemption requirements
+ * @param {Array<{name: string, publicKey: string, keypair: web3.Keypair}>} wallets - Wallets to validate
+ * @param {Object} options - Validation options
+ * @param {number} [options.solSpendPerWallet=0] - SOL amount each wallet will spend
+ * @param {boolean} [options.mayCreateTokenAccounts=true] - Whether operations might create token accounts
+ * @param {boolean} [options.isTipper=false] - Whether wallet will pay additional Jito tips
+ * @returns {Promise<Object>} Validation results with detailed breakdown
+ */
+async function validateWalletsForTokenOperations(wallets, options = {}) {
+    const {
+        solSpendPerWallet = 0,
+        mayCreateTokenAccounts = true,
+        isTipper = false
+    } = options;
+    
+    const connection = getSolanaConnection();
+    const results = {
+        overallValid: true,
+        validWallets: [],
+        invalidWallets: [],
+        summary: {
+            totalWallets: wallets.length,
+            validCount: 0,
+            invalidCount: 0
+        }
+    };
+    
+    console.log(`[WalletService] Validating ${wallets.length} wallets for token operations...`);
+    console.log(`[WalletService] Parameters: SOL spend ${solSpendPerWallet}, may create token accounts: ${mayCreateTokenAccounts}, is tipper: ${isTipper}`);
+    
+    for (const wallet of wallets) {
+        try {
+            // Get current balance
+            const balance = await getWalletBalance(connection, wallet.keypair.publicKey);
+            
+            // Calculate cost requirements based on operation type
+            const accountTypesToCreate = mayCreateTokenAccounts ? ['token'] : [];
+            const priorityFee = isTipper ? 100000 : 20000; // Higher fee for tippers
+            
+            const costCalculation = calculateTransactionCostWithRent({
+                priorityFeeMicrolamports: priorityFee,
+                computeUnitLimit: 200000,
+                accountTypesToCreate: accountTypesToCreate,
+                includeRentBuffer: true
+            });
+            
+            // Validate balance including spend amount
+            const validation = validateBalanceForRentOperations(
+                balance, 
+                costCalculation, 
+                solSpendPerWallet
+            );
+            
+            const walletResult = {
+                name: wallet.name,
+                publicKey: wallet.publicKey,
+                balance: balance,
+                validation: validation,
+                requirements: {
+                    transactionFee: costCalculation.summary.transactionFeeSOL,
+                    rentRequirements: costCalculation.summary.totalRentRequiredSOL,
+                    rentBuffer: costCalculation.summary.rentBufferSOL,
+                    solSpend: solSpendPerWallet,
+                    totalRequired: validation.totalRequired
+                }
+            };
+            
+            if (validation.isValid) {
+                results.validWallets.push(walletResult);
+                results.summary.validCount++;
+                console.log(`[WalletService] ✅ ${wallet.name}: ${balance} SOL (required: ${validation.totalRequired.toFixed(8)} SOL)`);
+            } else {
+                results.invalidWallets.push(walletResult);
+                results.summary.invalidCount++;
+                results.overallValid = false;
+                console.warn(`[WalletService] ❌ ${wallet.name}: ${balance} SOL (required: ${validation.totalRequired.toFixed(8)} SOL, shortfall: ${validation.shortfall.toFixed(8)} SOL)`);
+            }
+            
+        } catch (error) {
+            console.error(`[WalletService] Error validating wallet ${wallet.name}: ${error.message}`);
+            results.invalidWallets.push({
+                name: wallet.name,
+                publicKey: wallet.publicKey,
+                error: error.message,
+                validation: { isValid: false }
+            });
+            results.summary.invalidCount++;
+            results.overallValid = false;
+        }
+    }
+    
+    console.log(`[WalletService] Validation complete: ${results.summary.validCount}/${results.summary.totalWallets} wallets have sufficient balance`);
+    
+    if (!results.overallValid) {
+        const totalShortfall = results.invalidWallets
+            .filter(w => w.validation && w.validation.shortfall)
+            .reduce((sum, w) => sum + w.validation.shortfall, 0);
+            
+        if (totalShortfall > 0) {
+            console.warn(`[WalletService] Total shortfall across all invalid wallets: ${totalShortfall.toFixed(8)} SOL`);
+        }
+    }
+    
+    return results;
+}
+
 module.exports = {
     // Existing services (backward compatibility maintained)
     createOrImportMotherWalletService,
@@ -632,5 +754,8 @@ module.exports = {
     getTokenBalanceService,
     getAllTokenBalancesService,
     getWalletSummaryService,
-    getFormattedTokenBalanceService
+    getFormattedTokenBalanceService,
+    
+    // MONOCODE Compliance: Enhanced validation services for rent-aware operations
+    validateWalletsForTokenOperations
 }; 

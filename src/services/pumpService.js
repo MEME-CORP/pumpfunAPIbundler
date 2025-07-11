@@ -12,6 +12,7 @@ const {
     MOTHER_WALLET_FILE, // Though likely not used directly here
     CHILD_WALLETS_FILE
 } = require('../utils/walletUtils');
+const { validateWalletsForTokenOperations } = require('./walletService');
 const { 
     uploadMetadataToPumpPortal, 
     getTransactionsFromPumpPortal, 
@@ -36,22 +37,71 @@ const MIN_SOL_BALANCE_NON_TIPPER = 0.025;
 const LATEST_MINT_FILE = path.join(process.cwd(), 'data', 'latestMint_API.txt'); 
 
 /**
- * Validates SOL balances for wallets involved in a bundle.
+ * Validates SOL balances for wallets involved in token operations with rent consideration
+ * MONOCODE Compliance: Enhanced validation including rent exemption requirements for token accounts
  * @param {object[]} wallets - Array of wallet objects { name, publicKey, keypair, isTipper }
- * @param {web3.Connection} connection
- * @returns {Promise<boolean>} True if all balances are sufficient, false otherwise.
+ * @param {Object} [operationOptions={}] - Options for the operation being validated
+ * @param {number} [operationOptions.solSpendPerWallet=0] - SOL amount each wallet will spend
+ * @returns {Promise<boolean>} True if all balances are sufficient for token operations, false otherwise.
  */
-async function checkWalletBalances(wallets, connection) {
-    for (const wallet of wallets) {
-        const balance = await getWalletBalance(connection, wallet.keypair.publicKey);
-        const minBalance = wallet.isTipper ? MIN_SOL_BALANCE_TIPPER : MIN_SOL_BALANCE_NON_TIPPER;
-        console.log(`Wallet ${wallet.name} (${wallet.keypair.publicKey.toBase58()}) balance: ${balance} SOL. Required: ${minBalance} SOL.`);
-        if (balance < minBalance) {
-            console.error(`Insufficient balance for ${wallet.name}. Has ${balance}, needs ${minBalance}.`);
-            return false;
+async function checkWalletBalancesForTokenOperations(wallets, operationOptions = {}) {
+    const { solSpendPerWallet = 0 } = operationOptions;
+    
+    console.log(`[PumpService] Validating ${wallets.length} wallets for token operations (may create ATAs)`);
+    
+    // Group wallets by tipper status for more accurate validation
+    const tippers = wallets.filter(w => w.isTipper);
+    const nonTippers = wallets.filter(w => !w.isTipper);
+    
+    let allValid = true;
+    
+    // Validate tippers (higher requirements due to Jito tips)
+    if (tippers.length > 0) {
+        console.log(`[PumpService] Validating ${tippers.length} tipper wallet(s)...`);
+        const tipperValidation = await validateWalletsForTokenOperations(tippers, {
+            solSpendPerWallet: solSpendPerWallet,
+            mayCreateTokenAccounts: true,
+            isTipper: true
+        });
+        
+        if (!tipperValidation.overallValid) {
+            console.error(`[PumpService] ❌ ${tipperValidation.summary.invalidCount} tipper wallet(s) have insufficient balance`);
+            for (const invalid of tipperValidation.invalidWallets) {
+                if (invalid.validation && invalid.validation.shortfall) {
+                    console.error(`[PumpService]   ${invalid.name}: needs ${invalid.validation.shortfall.toFixed(8)} more SOL (has ${invalid.balance}, needs ${invalid.validation.totalRequired.toFixed(8)})`);
+                }
+            }
+            allValid = false;
         }
     }
-    return true;
+    
+    // Validate non-tippers
+    if (nonTippers.length > 0) {
+        console.log(`[PumpService] Validating ${nonTippers.length} non-tipper wallet(s)...`);
+        const nonTipperValidation = await validateWalletsForTokenOperations(nonTippers, {
+            solSpendPerWallet: solSpendPerWallet,
+            mayCreateTokenAccounts: true,
+            isTipper: false
+        });
+        
+        if (!nonTipperValidation.overallValid) {
+            console.error(`[PumpService] ❌ ${nonTipperValidation.summary.invalidCount} non-tipper wallet(s) have insufficient balance`);
+            for (const invalid of nonTipperValidation.invalidWallets) {
+                if (invalid.validation && invalid.validation.shortfall) {
+                    console.error(`[PumpService]   ${invalid.name}: needs ${invalid.validation.shortfall.toFixed(8)} more SOL (has ${invalid.balance}, needs ${invalid.validation.totalRequired.toFixed(8)})`);
+                }
+            }
+            allValid = false;
+        }
+    }
+    
+    if (allValid) {
+        console.log(`[PumpService] ✅ All wallets have sufficient balance for token operations (including rent exemption)`);
+    } else {
+        console.error(`[PumpService] ❌ Some wallets have insufficient balance. Token operations may fail with 'Insufficient Funds For Rent' errors.`);
+    }
+    
+    return allValid;
 }
 
 /**
@@ -144,8 +194,18 @@ async function createAndBuyService(
             }
         }, []);
 
-        if (!await checkWalletBalances(uniqueWalletsForBalanceCheck, connection)) {
-            throw new Error("Insufficient SOL balance in one or more participating wallets.");
+        // Calculate SOL spend per wallet for validation (sum of buy amounts)
+        const maxBuyAmount = Math.max(
+            buyAmountsSOL.devWalletBuySOL || 0,
+            ...Object.keys(buyAmountsSOL)
+                .filter(key => key.startsWith('firstBundledWallet'))
+                .map(key => buyAmountsSOL[key] || 0)
+        );
+        
+        if (!await checkWalletBalancesForTokenOperations(uniqueWalletsForBalanceCheck, { 
+            solSpendPerWallet: maxBuyAmount 
+        })) {
+            throw new Error("Insufficient SOL balance in one or more participating wallets for token operations (including rent exemption requirements).");
         }
 
         // 2. Metadata and IPFS Upload
@@ -350,8 +410,10 @@ async function batchBuyService(
                     ...wallet,
                     isTipper: index === 0 // First wallet in batch is the tipper
                 }));
-                if (!await checkWalletBalances(walletsForBalanceCheck, connection)) {
-                    throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1}.`);
+                if (!await checkWalletBalancesForTokenOperations(walletsForBalanceCheck, { 
+                    solSpendPerWallet: solAmountPerWallet 
+                })) {
+                    throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
                 }
 
                 const bundledTxArgs = [];
@@ -464,8 +526,10 @@ async function devSellService(
         console.log(`Attempting to sell ${sellAmountPercentage} of ${mintAddress} from DevWallet (${devWallet.publicKey}).`);
 
         // DevWallet is the tipper for this single transaction bundle
-        if (!await checkWalletBalances([{ ...devWallet, isTipper: true }], connection)) {
-            throw new Error("Insufficient SOL balance in DevWallet to cover transaction and Jito tip.");
+        if (!await checkWalletBalancesForTokenOperations([{ ...devWallet, isTipper: true }], { 
+            solSpendPerWallet: 0 // Selling tokens doesn't require SOL spend, but may need rent for ATAs
+        })) {
+            throw new Error("Insufficient SOL balance in DevWallet to cover transaction and Jito tip (including rent exemption requirements).");
         }
 
         const bundledTxArgs = [{
@@ -591,8 +655,10 @@ async function batchSellService(
                     ...wallet,
                     isTipper: index === 0 // First wallet in batch is the tipper
                 }));
-                if (!await checkWalletBalances(walletsForBalanceCheck, connection)) {
-                    throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1}.`);
+                if (!await checkWalletBalancesForTokenOperations(walletsForBalanceCheck, { 
+                    solSpendPerWallet: 0 // Selling tokens doesn't require SOL spend, but may need rent for ATAs
+                })) {
+                    throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
                 }
 
                 const bundledTxArgs = [];

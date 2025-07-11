@@ -328,6 +328,167 @@ function calculateTransactionFee(priorityFeeMicrolamports = 100000, computeUnitL
     return totalFee;
 }
 
+// MONOCODE Compliance: Enhanced rent calculation utilities for account creation
+/**
+ * Solana rent exemption constants based on official documentation
+ * Source: https://docs.solanalabs.com/implemented-proposals/rent
+ */
+const SOLANA_RENT_CONSTANTS = {
+    ACCOUNT_STORAGE_OVERHEAD: 128, // bytes
+    DEFAULT_LAMPORTS_PER_BYTE_YEAR: 3480, // lamports per byte per year
+    DEFAULT_EXEMPTION_THRESHOLD: 2.0, // 2 years of rent for exemption
+    
+    // Common account sizes for quick reference
+    BASIC_ACCOUNT_SIZE: 0, // Basic SOL account (just overhead)
+    TOKEN_ACCOUNT_SIZE: 165, // SPL Token account size
+    MULTISIG_ACCOUNT_SIZE: 355, // Multisig account size
+    MINT_ACCOUNT_SIZE: 82 // Token mint account size
+};
+
+/**
+ * Calculates rent exemption requirement for a given account size
+ * MONOCODE Compliance: Observable implementation with clear rent calculation
+ * @param {number} accountDataSize - Size of account data in bytes (excluding overhead)
+ * @returns {number} Rent exemption amount in lamports
+ */
+function calculateRentExemption(accountDataSize = 0) {
+    const totalAccountSize = accountDataSize + SOLANA_RENT_CONSTANTS.ACCOUNT_STORAGE_OVERHEAD;
+    const rentExemptionLamports = Math.ceil(
+        totalAccountSize * 
+        SOLANA_RENT_CONSTANTS.DEFAULT_LAMPORTS_PER_BYTE_YEAR * 
+        SOLANA_RENT_CONSTANTS.DEFAULT_EXEMPTION_THRESHOLD
+    );
+    
+    console.log(`[TransactionUtils] Rent calculation: ${accountDataSize} data bytes + ${SOLANA_RENT_CONSTANTS.ACCOUNT_STORAGE_OVERHEAD} overhead = ${totalAccountSize} total bytes`);
+    console.log(`[TransactionUtils] Rent exemption: ${rentExemptionLamports} lamports (${(rentExemptionLamports / web3.LAMPORTS_PER_SOL).toFixed(8)} SOL)`);
+    
+    return rentExemptionLamports;
+}
+
+/**
+ * Gets rent exemption amount for common account types
+ * MONOCODE Compliance: Explicit error handling with predefined account types
+ * @param {string} accountType - Type of account ('basic', 'token', 'mint', 'multisig')
+ * @returns {number} Rent exemption amount in lamports
+ */
+function getRentExemptionForAccountType(accountType) {
+    const accountSizes = {
+        'basic': SOLANA_RENT_CONSTANTS.BASIC_ACCOUNT_SIZE,
+        'token': SOLANA_RENT_CONSTANTS.TOKEN_ACCOUNT_SIZE,
+        'ATA': SOLANA_RENT_CONSTANTS.TOKEN_ACCOUNT_SIZE, // Alias for Associated Token Account
+        'mint': SOLANA_RENT_CONSTANTS.MINT_ACCOUNT_SIZE,
+        'multisig': SOLANA_RENT_CONSTANTS.MULTISIG_ACCOUNT_SIZE
+    };
+    
+    if (!(accountType in accountSizes)) {
+        throw new Error(`Unknown account type: ${accountType}. Supported types: ${Object.keys(accountSizes).join(', ')}`);
+    }
+    
+    const accountSize = accountSizes[accountType];
+    const rentLamports = calculateRentExemption(accountSize);
+    
+    console.log(`[TransactionUtils] ${accountType} account rent exemption: ${rentLamports} lamports (${(rentLamports / web3.LAMPORTS_PER_SOL).toFixed(8)} SOL)`);
+    return rentLamports;
+}
+
+/**
+ * Calculates total cost for operations that may create accounts
+ * MONOCODE Compliance: Progressive construction with comprehensive cost calculation
+ * @param {Object} options - Configuration object
+ * @param {number} [options.priorityFeeMicrolamports=100000] - Priority fee in microlamports
+ * @param {number} [options.computeUnitLimit=200000] - Compute unit limit
+ * @param {string[]} [options.accountTypesToCreate=[]] - Types of accounts that will be created
+ * @param {boolean} [options.includeRentBuffer=true] - Whether to include a safety buffer for rent
+ * @returns {Object} Cost breakdown with transaction fees and rent requirements
+ */
+function calculateTransactionCostWithRent(options = {}) {
+    const {
+        priorityFeeMicrolamports = 100000,
+        computeUnitLimit = 200000,
+        accountTypesToCreate = [],
+        includeRentBuffer = true
+    } = options;
+    
+    // Calculate base transaction fee
+    const transactionFee = calculateTransactionFee(priorityFeeMicrolamports, computeUnitLimit);
+    
+    // Calculate rent requirements for new accounts
+    let totalRentRequired = 0;
+    const rentBreakdown = {};
+    
+    for (const accountType of accountTypesToCreate) {
+        try {
+            const rentAmount = getRentExemptionForAccountType(accountType);
+            totalRentRequired += rentAmount;
+            rentBreakdown[accountType] = rentAmount;
+        } catch (error) {
+            console.warn(`[TransactionUtils] Could not calculate rent for account type ${accountType}: ${error.message}`);
+        }
+    }
+    
+    // Add safety buffer if requested (10% of total rent)
+    const rentBuffer = includeRentBuffer ? Math.ceil(totalRentRequired * 0.1) : 0;
+    const totalCost = transactionFee + totalRentRequired + rentBuffer;
+    
+    const result = {
+        transactionFee,
+        rentCost: totalRentRequired, // Explicit rent cost for easier access
+        buffer: rentBuffer,
+        totalCost,
+        rentBreakdown,
+        totalCostSOL: totalCost / web3.LAMPORTS_PER_SOL,
+        summary: {
+            transactionFeeSOL: transactionFee / web3.LAMPORTS_PER_SOL,
+            totalRentRequiredSOL: totalRentRequired / web3.LAMPORTS_PER_SOL,
+            rentBufferSOL: rentBuffer / web3.LAMPORTS_PER_SOL
+        }
+    };
+    
+    console.log(`[TransactionUtils] ✅ Total cost calculation:`);
+    console.log(`[TransactionUtils]   Transaction fee: ${result.summary.transactionFeeSOL.toFixed(8)} SOL`);
+    console.log(`[TransactionUtils]   Rent required: ${result.summary.totalRentRequiredSOL.toFixed(8)} SOL`);
+    console.log(`[TransactionUtils]   Rent buffer: ${result.summary.rentBufferSOL.toFixed(8)} SOL`);
+    console.log(`[TransactionUtils]   Total cost: ${result.totalCostSOL.toFixed(8)} SOL`);
+    
+    return result;
+}
+
+/**
+ * Validates if an account has sufficient balance for operations that may create accounts
+ * MONOCODE Compliance: Explicit error handling with detailed validation
+ * @param {number} accountBalanceSOL - Current account balance in SOL
+ * @param {Object} costCalculation - Result from calculateTransactionCostWithRent
+ * @param {number} [additionalSOLSpend=0] - Additional SOL that will be spent (e.g., token purchases)
+ * @returns {Object} Validation result with detailed information
+ */
+function validateBalanceForRentOperations(accountBalanceSOL, costCalculation, additionalSOLSpend = 0) {
+    const totalRequired = costCalculation.totalCostSOL + additionalSOLSpend;
+    const isValid = accountBalanceSOL >= totalRequired;
+    const shortfall = isValid ? 0 : totalRequired - accountBalanceSOL;
+    
+    const result = {
+        isValid,
+        accountBalance: accountBalanceSOL,
+        totalRequired,
+        shortfall,
+        breakdown: {
+            transactionFee: costCalculation.summary.transactionFeeSOL,
+            rentRequirements: costCalculation.summary.totalRentRequiredSOL,
+            rentBuffer: costCalculation.summary.rentBufferSOL,
+            additionalSpend: additionalSOLSpend
+        }
+    };
+    
+    if (isValid) {
+        console.log(`[TransactionUtils] ✅ Balance validation passed: ${accountBalanceSOL} SOL >= ${totalRequired.toFixed(8)} SOL required`);
+    } else {
+        console.warn(`[TransactionUtils] ❌ Insufficient balance: ${accountBalanceSOL} SOL < ${totalRequired.toFixed(8)} SOL required (shortfall: ${shortfall.toFixed(8)} SOL)`);
+        console.warn(`[TransactionUtils] Breakdown: TX fee ${result.breakdown.transactionFee.toFixed(8)} + Rent ${result.breakdown.rentRequirements.toFixed(8)} + Buffer ${result.breakdown.rentBuffer.toFixed(8)} + Additional ${result.breakdown.additionalSpend.toFixed(8)} SOL`);
+    }
+    
+    return result;
+}
+
 /**
  * Enhanced transaction sender with ADVANCED confirmation and smart fallback
  * Uses WebSocket-based confirmation with polling fallback to avoid rate limits
@@ -832,6 +993,14 @@ module.exports = {
     rateLimitedRpcCall,
     getRpcConfig: () => currentRpcConfig,
     RPC_CONFIGS,
+    
+    // MONOCODE Compliance: New rent calculation utilities
+    calculateRentExemption,
+    getRentExemptionForAccountType,
+    calculateTransactionCostWithRent,
+    validateBalanceForRentOperations,
+    SOLANA_RENT_CONSTANTS,
+    
     // Jupiter-specific functions
     addPriorityFeeInstructionsVersioned,
     sendAndConfirmVersionedTransaction,

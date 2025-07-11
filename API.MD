@@ -285,12 +285,13 @@ The API now supports secure image uploads for token creation using multipart/for
 - All trading endpoints use robust transaction handling, Jito bundles, and follow Solana best practices for reliability.
 - Private keys are never returned by trading endpoints.
 - All transaction results include bundle IDs and transaction signatures for on-chain verification.
-- **Minimum SOL Balance Requirements:** All wallets must maintain minimum SOL balances to cover transaction fees and Jito tips:
-  - **DevWallet (tipper):** 0.055 SOL minimum + any buy/sell amounts
-  - **Other wallets:** 0.025 SOL minimum + any buy/sell amounts
+- **Minimum SOL Balance Requirements:** All wallets must maintain minimum SOL balances to cover transaction fees, Jito tips, and rent exemption:
+  - **DevWallet (tipper):** 0.055 SOL minimum + any buy/sell amounts + 0.00204 SOL rent exemption
+  - **Other wallets:** 0.025 SOL minimum + any buy/sell amounts + 0.00204 SOL rent exemption
   - **Wallet Management Operations:** 0.0001 SOL minimum reserve for transaction fees
   - **Enhanced Fee Calculation:** Uses precise priority fee calculation (base 5,000 + priority ~20,000 lamports = ~25,000 lamports total)
-  - **Insufficient Balance Detection:** Enhanced error handling detects "custom program error: 1" and other insufficient funds variations
+  - **Rent Exemption:** 0.00203928 SOL (2,039,280 lamports) for Associated Token Account (ATA) creation
+  - **Insufficient Balance Detection:** Enhanced error handling detects "custom program error: 1", "Insufficient Funds For Rent", and other insufficient funds variations
   - Insufficient balance will result in transaction failure with clear error messages.
 
 ---
@@ -362,7 +363,9 @@ The API now supports secure image uploads for token creation using multipart/for
   - Detects "custom program error: 1" (insufficient lamports)
   - Detects "insufficient funds" and "Insufficient funds" variations
   - Detects "insufficient lamports" errors
+  - Detects "Insufficient Funds For Rent" errors (when wallet lacks rent exemption minimum)
   - Provides detailed logging for debugging
+  - Validates balances before operations with rent exemption calculations
 - **Network or RPC errors are handled gracefully and reported.**
 - **Transaction fee calculation errors are prevented through accurate fee estimation.**
 
