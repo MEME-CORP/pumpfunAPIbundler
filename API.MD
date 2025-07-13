@@ -9,6 +9,7 @@ This API provides endpoints for managing Solana wallets and interacting with the
 - **Memory-based Image Processing:** Images are processed in RAM for maximum security and scalability
 - **Jito Bundle Integration:** Optimized for MEV protection and transaction reliability
 - **Render-Compatible:** Fully compatible with ephemeral container deployments
+- **Flexible Field Names:** Supports both `privateKey` and `privateKeyBs58` for backward compatibility
 
 ---
 
@@ -19,19 +20,22 @@ This API provides endpoints for managing Solana wallets and interacting with the
 #### 1. Create or Import Airdrop (Mother) Wallet
 - **POST** `/api/wallets/airdrop`
 - **Body:** `{ "privateKey": "<base58 string>" }` (optional, for import)
-- **Response:** Public key, private key (if new), status message.
+- **Alternative Body:** `{ "privateKeyBs58": "<base58 string>" }` (optional, for import - legacy compatibility)
+- **Response:** Public key, private key (as base58), wallet name, status message.
+- **Note:** **Stateless Operation** - No data is stored on server. Wallets are created or imported and returned immediately.
 
 #### 2. Create Bundled (Child) Wallets
 - **POST** `/api/wallets/bundled/create`
 - **Body:** `{ "count": <number> }`
 - **Response:** List of created wallets, with one named "DevWallet" and the next four as "First Bundled Wallet 1-4".
+- **Note:** **Stateless Operation** - Wallets are generated and returned immediately. No server-side storage.
 
 #### 3. Import Bundled (Child) Wallets
 - **POST** `/api/wallets/bundled/import`
 - **Body:** `{ "wallets": [ { "name": "...", "privateKey": "<base58>" }, ... ] }`
 - **Alternative Body:** `{ "wallets": [ { "name": "...", "privateKeyBs58": "<base58>" }, ... ] }`
-- **Response:** List of imported wallets.
-- **Note:** Both `privateKey` and `privateKeyBs58` field names are accepted for flexibility.
+- **Response:** List of imported wallets with names, public keys, and private keys.
+- **Note:** **Stateless Operation** - Both `privateKey` and `privateKeyBs58` field names are accepted for flexibility. No server-side storage.
 
 #### 4. Fund Bundled Wallets
 - **POST** `/api/wallets/fund-bundled`

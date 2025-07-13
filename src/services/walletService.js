@@ -15,12 +15,14 @@ const SOL_TO_LEAVE_FOR_FEES = 0.0001; // More conservative amount for transactio
 
 /**
  * Creates a new Airdrop (Mother) wallet or imports an existing one.
+ * MONOCODE Compliance: Stateless operation - no file system dependencies for API compatibility
  * @param {string} [privateKeyBs58] - Optional base58 private key to import.
  * @returns {Promise<object>} Wallet details { publicKey, privateKey, name }.
  */
 async function createOrImportMotherWalletService(privateKeyBs58) {
     let keypair;
     const walletName = "MotherAirdropWallet";
+    
     if (privateKeyBs58) {
         try {
             const secretKey = bs58Decoder.decode(privateKeyBs58);
@@ -38,9 +40,15 @@ async function createOrImportMotherWalletService(privateKeyBs58) {
         console.log(`New mother wallet created: ${keypair.publicKey.toBase58()}`);
     }
 
-    // Save and return, including the private key as per user requirement for API response
-    const savedWalletData = await saveKeypairToFile(keypair, MOTHER_WALLET_FILE, walletName);
-    return savedWalletData; 
+    // MONOCODE Fix: Return wallet data directly without file storage for stateless operation
+    const walletData = {
+        publicKey: keypair.publicKey.toBase58(),
+        privateKey: bs58Decoder.encode(keypair.secretKey), // Return as base58 for API compatibility
+        name: walletName
+    };
+    
+    console.log(`[WalletService] ${privateKeyBs58 ? 'Imported' : 'Created'} wallet (stateless): ${walletData.publicKey}`);
+    return walletData; 
 }
 
 
@@ -49,6 +57,7 @@ async function createOrImportMotherWalletService(privateKeyBs58) {
 /**
  * Creates a specified number of new Bundled (Child) Wallets.
  * One will be named DevWallet, first four after DevWallet will be "First Bundled Wallet X".
+ * MONOCODE Compliance: Stateless operation - no file system dependencies
  * @param {number} count - Total number of child wallets to create (including DevWallet).
  * @param {string} devWalletName - Name for the dev wallet (e.g., "DevWallet").
  * @param {string} firstBundledWalletBaseName - Base name for the first 4 special bundled wallets (e.g., "First Bundled Wallet").
@@ -72,13 +81,21 @@ async function createBundledWalletsService(count, devWalletName = "DevWallet", f
         childWallets.push({ name, keypair });
     }
     console.log(`${count} child wallets generated programmatically.`);
-    const savedWalletsData = await saveChildWalletsToFile(childWallets, CHILD_WALLETS_FILE);
-    return savedWalletsData;
+    
+    // MONOCODE Fix: Return wallet data directly without file storage for stateless operation
+    const walletsData = childWallets.map(wallet => ({
+        name: wallet.name,
+        publicKey: wallet.keypair.publicKey.toBase58(),
+        privateKey: bs58Decoder.encode(wallet.keypair.secretKey), // Return as base58 for API compatibility
+    }));
+    
+    console.log(`[WalletService] Created ${walletsData.length} bundled wallets (stateless)`);
+    return walletsData;
 }
 
 /**
  * Imports Bundled (Child) Wallets from an array of private keys.
- * MONOCODE Compliance: Enhanced flexibility to accept both privateKey and privateKeyBs58 field names
+ * MONOCODE Compliance: Enhanced flexibility to accept both privateKey and privateKeyBs58 field names + Stateless operation
  * @param {Array<{name: string, privateKeyBs58?: string, privateKey?: string}>} walletImportData - Array of objects with name and privateKeyBs58 or privateKey.
  * @returns {Promise<Array<object>>} Array of imported wallet details [{ name, publicKey, privateKey }].
  */
@@ -110,8 +127,16 @@ async function importBundledWalletsService(walletImportData) {
         }
     }
     console.log(`${childWallets.length} child wallets imported programmatically.`);
-    const savedWalletsData = await saveChildWalletsToFile(childWallets, CHILD_WALLETS_FILE);
-    return savedWalletsData;
+    
+    // MONOCODE Fix: Return wallet data directly without file storage for stateless operation
+    const walletsData = childWallets.map(wallet => ({
+        name: wallet.name,
+        publicKey: wallet.keypair.publicKey.toBase58(),
+        privateKey: bs58Decoder.encode(wallet.keypair.secretKey), // Return as base58 for API compatibility
+    }));
+    
+    console.log(`[WalletService] Imported ${walletsData.length} bundled wallets (stateless)`);
+    return walletsData;
 }
 
 async function getWalletBalanceService(publicKeyString) {

@@ -2,11 +2,13 @@ const walletService = require('../services/walletService');
 
 async function createOrImportAirdropWallet(req, res) {
     try {
-        // For POST, data is in req.body. If privateKey is optional for create, 
-        // it might come via query param for GET or be absent.
-        // Assuming privateKey for import is sent in req.body
-        const { privateKeyBs58 } = req.body; 
-        const walletDetails = await walletService.createOrImportMotherWalletService(privateKeyBs58);
+        // MONOCODE Fix: Support both field names for compatibility and match API.MD documentation
+        const { privateKey, privateKeyBs58 } = req.body; 
+        const privateKeyParam = privateKey || privateKeyBs58; // Prioritize 'privateKey' as per API.MD
+        
+        console.log(`[WalletController] Airdrop wallet request: ${privateKeyParam ? 'IMPORT' : 'CREATE'}`);
+        
+        const walletDetails = await walletService.createOrImportMotherWalletService(privateKeyParam);
         res.status(200).json({ message: 'Airdrop wallet processed successfully.', data: walletDetails });
     } catch (error) {
         console.error('[APIError] /api/wallets/airdrop:', error.message);
