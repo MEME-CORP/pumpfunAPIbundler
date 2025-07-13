@@ -154,34 +154,61 @@ async function getWalletBalanceService(publicKeyString) {
 
 /**
  * Funds specified child wallets from the mother wallet.
+ * MONOCODE Compliance: Stateless operation - wallets provided via API request
  * @param {number} amountPerWalletSOL - Amount of SOL to send to each child wallet.
+ * @param {Array<{name: string, privateKey: string, privateKeyBs58?: string}>} childWallets - Array of child wallet objects with private keys.
+ * @param {string} motherWalletPrivateKeyBs58 - Required private key for mother wallet (base58 encoded).
  * @param {string[]} [targetWalletNames] - Optional array of child wallet names to fund. If empty/null, funds all.
- * @param {string} [motherWalletPrivateKeyBs58] - Optional private key for mother wallet if not using default.
  * @returns {Promise<Array<object>>} Array of results, each { name, publicKey, signature, status, balanceAfter }.
  */
-async function fundChildWalletsService(amountPerWalletSOL, targetWalletNames, motherWalletPrivateKeyBs58) {
+async function fundChildWalletsService(amountPerWalletSOL, childWallets, motherWalletPrivateKeyBs58, targetWalletNames) {
     const connection = getSolanaConnection();
+    
+    // MONOCODE Fix: Require mother wallet private key for stateless operation
+    if (!motherWalletPrivateKeyBs58) {
+        throw new Error('Mother wallet private key is required for stateless funding operation.');
+    }
+    
     let motherWallet;
-    if (motherWalletPrivateKeyBs58) {
-        try {
-            const secretKey = bs58Decoder.decode(motherWalletPrivateKeyBs58);
-            motherWallet = web3.Keypair.fromSecretKey(secretKey);
-        } catch (e) {
-            throw new Error('Invalid mother wallet private key for funding.');
-        }
-    } else {
-        const loadedMother = await loadKeypairFromFile(MOTHER_WALLET_FILE);
-        if (!loadedMother) throw new Error('Mother wallet not found. Please create or import it first.');
-        motherWallet = loadedMother.keypair;
+    try {
+        const secretKey = bs58Decoder.decode(motherWalletPrivateKeyBs58);
+        motherWallet = web3.Keypair.fromSecretKey(secretKey);
+    } catch (e) {
+        throw new Error('Invalid mother wallet private key for funding.');
     }
 
     const motherBalance = await getWalletBalance(connection, motherWallet.publicKey);
     console.log(`Mother wallet ${motherWallet.publicKey.toBase58()} balance: ${motherBalance} SOL`);
 
-    let allChildWallets = await loadChildWalletsFromFile(CHILD_WALLETS_FILE);
-    if (!allChildWallets || allChildWallets.length === 0) {
-        throw new Error('No child wallets found. Please create them first.');
+    // MONOCODE Fix: Use provided child wallets instead of loading from file
+    if (!childWallets || childWallets.length === 0) {
+        throw new Error('No child wallets provided in the request.');
     }
+    
+    // Convert provided child wallets to keypair objects
+    const allChildWallets = [];
+    for (const walletData of childWallets) {
+        const { name, privateKey, privateKeyBs58 } = walletData;
+        const privateKeyValue = privateKey || privateKeyBs58;
+        
+        if (!name || !privateKeyValue) {
+            throw new Error(`Each child wallet must have a name and privateKey. Missing for wallet: ${JSON.stringify(walletData)}`);
+        }
+        
+        try {
+            const secretKey = bs58Decoder.decode(privateKeyValue);
+            const keypair = web3.Keypair.fromSecretKey(secretKey);
+            allChildWallets.push({
+                name: name,
+                publicKey: keypair.publicKey.toBase58(),
+                keypair: keypair
+            });
+        } catch (error) {
+            throw new Error(`Failed to decode private key for wallet ${name}: ${error.message}`);
+        }
+    }
+    
+    console.log(`[WalletService] Loaded ${allChildWallets.length} child wallets from API request`);
 
     const walletsToFund = targetWalletNames && targetWalletNames.length > 0
         ? allChildWallets.filter(cw => targetWalletNames.includes(cw.name))
@@ -250,18 +277,45 @@ async function fundChildWalletsService(amountPerWalletSOL, targetWalletNames, mo
 
 /**
  * Returns SOL from specified child wallets to the mother wallet.
+ * MONOCODE Compliance: Stateless operation - wallets provided via API request
+ * @param {Array<{name: string, privateKey: string, privateKeyBs58?: string}>} childWallets - Array of child wallet objects with private keys.
  * @param {string} motherWalletPublicKeyBs58 - Public key of the mother wallet to receive funds.
  * @param {string[]} [sourceWalletNames] - Optional array of child wallet names to return funds from. If empty/null, returns from all.
  * @returns {Promise<Array<object>>} Array of results, each { name, publicKey, signature, status, balanceAfter, amountReturned }.
  */
-async function returnFundsToMotherWalletService(motherWalletPublicKeyBs58, sourceWalletNames) {
+async function returnFundsToMotherWalletService(childWallets, motherWalletPublicKeyBs58, sourceWalletNames) {
     const connection = getSolanaConnection();
     const motherPublicKey = new web3.PublicKey(motherWalletPublicKeyBs58);
 
-    let allChildWallets = await loadChildWalletsFromFile(CHILD_WALLETS_FILE);
-    if (!allChildWallets || allChildWallets.length === 0) {
-        throw new Error('No child wallets found to return funds from.');
+    // MONOCODE Fix: Use provided child wallets instead of loading from file
+    if (!childWallets || childWallets.length === 0) {
+        throw new Error('No child wallets provided in the request.');
     }
+    
+    // Convert provided child wallets to keypair objects
+    const allChildWallets = [];
+    for (const walletData of childWallets) {
+        const { name, privateKey, privateKeyBs58 } = walletData;
+        const privateKeyValue = privateKey || privateKeyBs58;
+        
+        if (!name || !privateKeyValue) {
+            throw new Error(`Each child wallet must have a name and privateKey. Missing for wallet: ${JSON.stringify(walletData)}`);
+        }
+        
+        try {
+            const secretKey = bs58Decoder.decode(privateKeyValue);
+            const keypair = web3.Keypair.fromSecretKey(secretKey);
+            allChildWallets.push({
+                name: name,
+                publicKey: keypair.publicKey.toBase58(),
+                keypair: keypair
+            });
+        } catch (error) {
+            throw new Error(`Failed to decode private key for wallet ${name}: ${error.message}`);
+        }
+    }
+    
+    console.log(`[WalletService] Loaded ${allChildWallets.length} child wallets for return funds operation`);
 
     const walletsToReturnFrom = sourceWalletNames && sourceWalletNames.length > 0
         ? allChildWallets.filter(cw => sourceWalletNames.includes(cw.name))

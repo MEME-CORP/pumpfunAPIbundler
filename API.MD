@@ -39,15 +39,36 @@ This API provides endpoints for managing Solana wallets and interacting with the
 
 #### 4. Fund Bundled Wallets
 - **POST** `/api/wallets/fund-bundled`
-- **Body:** `{ "amountPerWallet": <number> }`
+- **Body:** 
+  ```json
+  {
+    "amountPerWalletSOL": <number>,
+    "childWallets": [
+      { "name": "DevWallet", "privateKey": "<base58 string>" },
+      { "name": "First Bundled Wallet 1", "privateKey": "<base58 string>" }
+    ],
+    "motherWalletPrivateKeyBs58": "<base58 string>",
+    "targetWalletNames": ["DevWallet"] // optional
+  }
+  ```
 - **Response:** Transaction results for each wallet.
-- **Note:** Mother wallet must have sufficient balance to cover transfers plus rent exemption requirements for token operations.
+- **Note:** **Stateless Operation** - All wallet credentials must be provided in the request. Mother wallet must have sufficient balance to cover transfers plus rent exemption requirements for token operations.
 
 #### 5. Return Funds to Mother Wallet
 - **POST** `/api/wallets/return-funds`
-- **Body:** `{ "leaveDust": <boolean> }`
+- **Body:** 
+  ```json
+  {
+    "childWallets": [
+      { "name": "DevWallet", "privateKey": "<base58 string>" },
+      { "name": "First Bundled Wallet 1", "privateKey": "<base58 string>" }
+    ],
+    "motherWalletPublicKeyBs58": "<base58 string>",
+    "sourceWalletNames": ["DevWallet"] // optional
+  }
+  ```
 - **Response:** Transaction results for each wallet.
-- **Note:** Automatically preserves rent exemption amounts (~0.00204 SOL) in each wallet for future token operations.
+- **Note:** **Stateless Operation** - All wallet credentials must be provided in the request. Automatically preserves rent exemption amounts (~0.00204 SOL) in each wallet for future token operations.
 
 #### 6. Get Wallet Balance (Enhanced SPL Token Support)
 

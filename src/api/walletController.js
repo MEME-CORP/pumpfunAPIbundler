@@ -309,12 +309,23 @@ async function getAllTokenBalances(req, res) {
 
 async function fundBundledWallets(req, res) {
     try {
-        const { amountPerWalletSOL, targetWalletNames, motherWalletPrivateKeyBs58 } = req.body;
+        const { amountPerWalletSOL, childWallets, motherWalletPrivateKeyBs58, targetWalletNames } = req.body;
+        
+        // Validation
         if (typeof amountPerWalletSOL !== 'number' || amountPerWalletSOL <= 0) {
             return res.status(400).json({ message: 'Invalid input: amountPerWalletSOL must be a positive number.' });
         }
-        // targetWalletNames and motherWalletPrivateKeyBs58 are optional
-        const results = await walletService.fundChildWalletsService(amountPerWalletSOL, targetWalletNames, motherWalletPrivateKeyBs58);
+        if (!childWallets || !Array.isArray(childWallets) || childWallets.length === 0) {
+            return res.status(400).json({ message: 'Invalid input: childWallets must be a non-empty array of wallet objects.' });
+        }
+        if (!motherWalletPrivateKeyBs58) {
+            return res.status(400).json({ message: 'Invalid input: motherWalletPrivateKeyBs58 is required for stateless funding operation.' });
+        }
+        
+        console.log(`[WalletController] Funding ${childWallets.length} child wallets with ${amountPerWalletSOL} SOL each`);
+        
+        // Call service with updated signature
+        const results = await walletService.fundChildWalletsService(amountPerWalletSOL, childWallets, motherWalletPrivateKeyBs58, targetWalletNames);
         res.status(200).json({ message: 'Funding process completed.', data: results });
     } catch (error) {
         console.error('[APIError] /api/wallets/fund-bundled:', error.message);
@@ -324,12 +335,20 @@ async function fundBundledWallets(req, res) {
 
 async function returnFundsToMother(req, res) {
     try {
-        const { motherWalletPublicKeyBs58, sourceWalletNames } = req.body;
+        const { childWallets, motherWalletPublicKeyBs58, sourceWalletNames } = req.body;
+        
+        // Validation
+        if (!childWallets || !Array.isArray(childWallets) || childWallets.length === 0) {
+            return res.status(400).json({ message: 'Invalid input: childWallets must be a non-empty array of wallet objects.' });
+        }
         if (!motherWalletPublicKeyBs58) {
             return res.status(400).json({ message: 'Invalid input: motherWalletPublicKeyBs58 is required.' });
         }
-        // sourceWalletNames is optional
-        const results = await walletService.returnFundsToMotherWalletService(motherWalletPublicKeyBs58, sourceWalletNames);
+        
+        console.log(`[WalletController] Returning funds from ${childWallets.length} child wallets to mother wallet`);
+        
+        // Call service with updated signature  
+        const results = await walletService.returnFundsToMotherWalletService(childWallets, motherWalletPublicKeyBs58, sourceWalletNames);
         res.status(200).json({ message: 'Return funds process completed.', data: results });
     } catch (error) {
         console.error('[APIError] /api/wallets/return-funds:', error.message);
