@@ -4,6 +4,7 @@ const web3 = require('@solana/web3.js');
 const { VersionedTransaction, Keypair } = web3;
 const { sendJitoBundleWithRetries, pollBundleStatus, sleep } = require('./transactionUtils');
 const { getSolanaConnection } = require('./walletUtils');
+const FormData = require('form-data'); // MONOCODE Fix: Use form-data package for proper multipart headers with node-fetch v2
 
 // Constants for Pump Portal (can be made configurable)
 const PUMP_PORTAL_API_URL = 'https://pumpportal.fun/api';
@@ -39,14 +40,20 @@ async function uploadMetadataToPumpPortal(metadata, imageBuffer, imageFileName) 
         try {
             console.log(`Uploading image to Pinata: ${imageFileName} (${imageBuffer.length} bytes)`);
             
-            const { Blob } = await import('buffer');
+            // MONOCODE Fix: Use form-data package for proper multipart headers with node-fetch v2
             const imageFormData = new FormData();
             imageFormData.append('network', 'public');
-            imageFormData.append('file', new Blob([imageBuffer]), imageFileName);
+            imageFormData.append('file', imageBuffer, {
+                filename: imageFileName,
+                contentType: 'image/jpeg' // Default content type, could be made dynamic
+            });
             
             const imageOptions = {
                 method: 'POST',
-                headers: { Authorization: `Bearer ${pinataJWT}` },
+                headers: {
+                    Authorization: `Bearer ${pinataJWT}`,
+                    ...imageFormData.getHeaders() // MONOCODE Fix: Add proper multipart headers
+                },
                 body: imageFormData
             };
             
@@ -87,16 +94,20 @@ async function uploadMetadataToPumpPortal(metadata, imageBuffer, imageFileName) 
         
         console.log(`Creating metadata file for Pinata upload:`, metadataObject);
         
-        // Create metadata file
-        const { File } = await import('buffer');
-        const metadataFile = new File([JSON.stringify(metadataObject)], 'metadata.json');
+        // MONOCODE Fix: Use form-data package for proper multipart headers with node-fetch v2
         const metadataFormData = new FormData();
         metadataFormData.append('network', 'public');
-        metadataFormData.append('file', metadataFile);
+        metadataFormData.append('file', JSON.stringify(metadataObject), {
+            filename: 'metadata.json',
+            contentType: 'application/json'
+        });
         
         const metadataOptions = {
             method: 'POST',
-            headers: { Authorization: `Bearer ${pinataJWT}` },
+            headers: {
+                Authorization: `Bearer ${pinataJWT}`,
+                ...metadataFormData.getHeaders() // MONOCODE Fix: Add proper multipart headers
+            },
             body: metadataFormData
         };
         
