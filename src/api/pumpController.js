@@ -77,6 +77,20 @@ async function createAndBuy(req, res) {
         let imageData = null;
         
         if (req.file) {
+            // MONOCODE Fix: Validate uploaded file has valid content before processing
+            if (!req.file.buffer || req.file.size === 0) {
+                console.error(`[PumpController] Invalid file upload: ${req.file.originalname} has ${req.file.size} bytes`);
+                return res.status(400).json({ 
+                    message: 'Invalid file upload: File appears to be empty or corrupted. Please check the file and try again.',
+                    error: 'EMPTY_FILE_UPLOAD',
+                    details: {
+                        fileName: req.file.originalname,
+                        fileSize: req.file.size,
+                        mimeType: req.file.mimetype
+                    }
+                });
+            }
+            
             // Image uploaded via multipart/form-data
             console.log(`[PumpController] Image uploaded: ${req.file.originalname} (${req.file.size} bytes, ${req.file.mimetype})`);
             imageData = {

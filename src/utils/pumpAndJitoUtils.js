@@ -37,6 +37,12 @@ async function uploadMetadataToPumpPortal(metadata, imageBuffer, imageFileName) 
     
     // Step 1: Upload image to Pinata if provided
     if (imageBuffer && imageFileName) {
+        // MONOCODE Fix: Validate image buffer has valid content before uploading to Pinata
+        if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
+            console.error(`[PumpAndJitoUtils] Invalid image buffer: ${imageFileName} has ${imageBuffer ? imageBuffer.length : 0} bytes`);
+            throw new Error(`Invalid image buffer: ${imageFileName} appears to be empty or corrupted`);
+        }
+        
         try {
             console.log(`Uploading image to Pinata: ${imageFileName} (${imageBuffer.length} bytes)`);
             

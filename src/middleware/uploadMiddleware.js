@@ -75,6 +75,20 @@ const uploadMiddleware = (req, res, next) => {
         // Log successful upload
         if (req.file) {
             console.log(`[UploadMiddleware] ✅ File uploaded successfully: ${req.file.originalname} (${req.file.size} bytes)`);
+            
+            // MONOCODE Fix: Validate uploaded file has valid content
+            if (!req.file.buffer || req.file.size === 0) {
+                console.error(`[UploadMiddleware] Empty file detected: ${req.file.originalname} has ${req.file.size} bytes`);
+                return res.status(400).json({
+                    message: 'File upload failed: File appears to be empty. Please check the file and try again.',
+                    error: 'EMPTY_FILE_UPLOAD',
+                    details: {
+                        fileName: req.file.originalname,
+                        fileSize: req.file.size,
+                        mimeType: req.file.mimetype
+                    }
+                });
+            }
         }
         
         next();
