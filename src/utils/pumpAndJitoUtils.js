@@ -189,7 +189,7 @@ async function preparePumpTransactionsForJito(rawTransactionsFromApi, walletBatc
             const signers = [wallet.keypair];
             // Check if this is a create transaction that needs the mintKeypair signature
             // This is a heuristic based on the presence of mintKeypair. A more robust way would be to inspect txArgs if available here.
-            if (mintKeypair && deserializedTx.message.instructions.some(ix => {
+            if (mintKeypair && deserializedTx.message.compiledInstructions && deserializedTx.message.compiledInstructions.some(ix => {
                 // A simple check, real create instruction might be complex.
                 // This assumes the create instruction involves the mint public key in its accounts.
                 const programId = deserializedTx.message.accountKeys[ix.programIdIndex].toBase58();
