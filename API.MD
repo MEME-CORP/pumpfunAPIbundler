@@ -206,14 +206,16 @@ This API provides endpoints for managing Solana wallets and interacting with the
 
 The API now supports secure image uploads for token creation using multipart/form-data uploads. Key features:
 
-- **Memory-based Processing:** Images are processed in RAM and streamed directly to
+- **Memory-based Processing:** Images are processed in RAM and uploaded to Pinata IPFS
 - **No Disk Storage:** Files are never saved to the server filesystem (stateless operation)
+- **IPFS Integration:** Images and metadata are stored on IPFS via Pinata for decentralized access
 - **Security:** File type validation, size limits (5MB), and comprehensive error handling
 - **Render-Compatible:** Works perfectly with ephemeral containers and horizontal scaling
 
 **Supported Image Formats:** PNG, JPG, JPEG, GIF, WebP, SVG  
 **Maximum File Size:** 5MB  
-**Upload Field Name:** `image`
+**Upload Field Name:** `image`  
+**Environment Variable Required:** `PINATA_JWT` must be set for IPFS uploads
 
 #### 1. Create Token and Initial Buy
 - **POST** `/api/pump/create-and-buy`
@@ -250,7 +252,7 @@ The API now supports secure image uploads for token creation using multipart/for
   ```
 - **Response:** Mint address, bundle ID, transaction details, status.
 - **Important Notes:** 
-  - Images are processed in memory and streamed directly. No files are saved to disk.
+  - Images are processed in memory and uploaded to Pinata IPFS for decentralized storage. No files are saved to disk.
   - **buyAmountsSOL must be a valid JSON string** when using multipart/form-data (not a JavaScript object).
   - **wallets must be a valid JSON string** containing an array of wallet objects with `name` and `privateKey` properties.
   - **Required Wallet Names:**

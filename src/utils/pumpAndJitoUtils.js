@@ -8,7 +8,7 @@ const { getSolanaConnection } = require('./walletUtils');
 // Constants for Pump Portal (can be made configurable)
 const PUMP_PORTAL_API_URL = 'https://pumpportal.fun/api';
 const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = `${PUMP_PORTAL_API_URL}/trade-local`;
-const PUMP_PORTAL_IPFS_ENDPOINT = 'https://pump.fun/api/ipfs'; // MONOCODE Fix: Correct domain for IPFS upload
+// MONOCODE Fix: Removed PUMP_PORTAL_IPFS_ENDPOINT - now using Pinata for IPFS uploads
 
 // Default Jito tip for pump.fun transactions (can be overridden by specific services)
 const DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE = 0.001; // As determined successful
@@ -17,44 +17,108 @@ const DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL = 0;
 const bs58Decoder = bs58.default || bs58;
 
 /**
- * Uploads metadata (and optionally an image) to Pump Portal's IPFS.
+ * Uploads metadata (and optionally an image) to Pinata IPFS.
+ * MONOCODE Fix: Switch to Pinata IPFS as pump.fun no longer supports direct IPFS uploads
  * @param {object} metadata - The token metadata (name, symbol, description, etc.).
  * @param {Buffer} [imageBuffer] - Optional image buffer.
  * @param {string} [imageFileName] - Optional image file name (e.g., 'token.png').
  * @returns {Promise<string>} The IPFS metadata URI.
  */
 async function uploadMetadataToPumpPortal(metadata, imageBuffer, imageFileName) {
-    const formData = new FormData();
-    formData.append('name', metadata.name);
-    formData.append('symbol', metadata.symbol);
-    formData.append('description', metadata.description);
-    if (metadata.twitter) formData.append('twitter', metadata.twitter);
-    if (metadata.telegram) formData.append('telegram', metadata.telegram);
-    if (metadata.website) formData.append('website', metadata.website);
-    if (metadata.showName) formData.append('showName', metadata.showName.toString()); // true or false
+    const pinataJWT = process.env.PINATA_JWT;
+    if (!pinataJWT) {
+        throw new Error('PINATA_JWT environment variable is required for IPFS uploads');
+    }
 
+    console.log(`Uploading metadata to Pinata IPFS: ${JSON.stringify(metadata)}`);
+    
+    let imageUrl = null;
+    
+    // Step 1: Upload image to Pinata if provided
     if (imageBuffer && imageFileName) {
-        const { Blob } = await import('buffer'); // Dynamic import for Blob
-        formData.append('file', new Blob([imageBuffer]), imageFileName);
+        try {
+            console.log(`Uploading image to Pinata: ${imageFileName} (${imageBuffer.length} bytes)`);
+            
+            const { Blob } = await import('buffer');
+            const imageFormData = new FormData();
+            imageFormData.append('network', 'public');
+            imageFormData.append('file', new Blob([imageBuffer]), imageFileName);
+            
+            const imageOptions = {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${pinataJWT}` },
+                body: imageFormData
+            };
+            
+            const imageResponse = await fetch('https://uploads.pinata.cloud/v3/files', imageOptions);
+            if (!imageResponse.ok) {
+                const errorText = await imageResponse.text();
+                throw new Error(`Pinata image upload failed: ${imageResponse.status} ${errorText}`);
+            }
+            
+            const imageResult = await imageResponse.json();
+            if (!imageResult.data || !imageResult.data.cid) {
+                throw new Error('Pinata image upload response missing CID');
+            }
+            
+            imageUrl = `https://ipfs.io/ipfs/${imageResult.data.cid}`;
+            console.log(`Image uploaded successfully: ${imageUrl}`);
+        } catch (error) {
+            console.error('Failed to upload image to Pinata:', error);
+            throw new Error(`Image upload failed: ${error.message}`);
+        }
     }
-
-    console.log(`Uploading metadata to Pump Portal IPFS: ${JSON.stringify(metadata)}`);
-    const response = await fetch(PUMP_PORTAL_IPFS_ENDPOINT, {
-        method: 'POST',
-        body: formData,
-        // Headers are set automatically by node-fetch for FormData
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Pump Portal IPFS upload failed: ${response.status} ${errorText}`);
+    
+    // Step 2: Create and upload metadata to Pinata
+    try {
+        const metadataObject = {
+            name: metadata.name,
+            symbol: metadata.symbol,
+            description: metadata.description,
+            twitter: metadata.twitter || '',
+            telegram: metadata.telegram || '',
+            website: metadata.website || ''
+        };
+        
+        // Add image URL to metadata if image was uploaded
+        if (imageUrl) {
+            metadataObject.image = imageUrl;
+        }
+        
+        console.log(`Creating metadata file for Pinata upload:`, metadataObject);
+        
+        // Create metadata file
+        const { File } = await import('buffer');
+        const metadataFile = new File([JSON.stringify(metadataObject)], 'metadata.json');
+        const metadataFormData = new FormData();
+        metadataFormData.append('network', 'public');
+        metadataFormData.append('file', metadataFile);
+        
+        const metadataOptions = {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${pinataJWT}` },
+            body: metadataFormData
+        };
+        
+        const metadataResponse = await fetch('https://uploads.pinata.cloud/v3/files', metadataOptions);
+        if (!metadataResponse.ok) {
+            const errorText = await metadataResponse.text();
+            throw new Error(`Pinata metadata upload failed: ${metadataResponse.status} ${errorText}`);
+        }
+        
+        const metadataResult = await metadataResponse.json();
+        if (!metadataResult.data || !metadataResult.data.cid) {
+            throw new Error('Pinata metadata upload response missing CID');
+        }
+        
+        const metadataUri = `https://ipfs.io/ipfs/${metadataResult.data.cid}`;
+        console.log(`Metadata uploaded successfully. URI: ${metadataUri}`);
+        return metadataUri;
+        
+    } catch (error) {
+        console.error('Failed to upload metadata to Pinata:', error);
+        throw new Error(`Metadata upload failed: ${error.message}`);
     }
-    const responseData = await response.json();
-    if (!responseData.metadataUri) {
-        throw new Error('Pump Portal IPFS response did not include metadataUri.');
-    }
-    console.log(`Metadata uploaded successfully. URI: ${responseData.metadataUri}`);
-    return responseData.metadataUri;
 }
 
 /**
@@ -158,7 +222,6 @@ module.exports = {
     preparePumpTransactionsForJito,
     PUMP_PORTAL_API_URL,
     PUMP_PORTAL_TRADE_LOCAL_ENDPOINT,
-    PUMP_PORTAL_IPFS_ENDPOINT,
     DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE,
     DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL
 }; 
