@@ -167,14 +167,16 @@ async function getTransactionsFromPumpPortal(transactionArgs) {
  * Prepares and signs a batch of transactions obtained from Pump Portal.
  * @param {Array<string>} rawTransactionsFromApi - Array of base58 encoded transaction strings from Pump Portal.
  * @param {Array<object>} walletBatch - Array of wallet objects ({ name, keypair, publicKey }) corresponding to each transaction.
- * @param {string} recentBlockhash - The recent blockhash to use for all transactions in the batch.
+ * @param {Object} recentBlockhashData - The recent blockhash data with blockhash and lastValidBlockHeight.
  * @param {web3.Keypair} [mintKeypair] - Optional. The keypair for the token mint, required for 'create' transactions.
- * @returns {Promise<Array<string>>} Array of base58 encoded *signed* transaction strings for the Jito bundle.
+ * @returns {Promise<Object>} Object containing signedEncodedTransactions and primarySignatures arrays.
  */
-async function preparePumpTransactionsForJito(rawTransactionsFromApi, walletBatch, recentBlockhash, mintKeypair) {
+async function preparePumpTransactionsForJito(rawTransactionsFromApi, walletBatch, recentBlockhashData, mintKeypair) {
     const signedEncodedTransactions = [];
     const primarySignatures = []; // MONOCODE Fix: Track primary signatures for WebSocket confirmation
     const connection = getSolanaConnection(); // Get a connection instance
+
+    console.log(`[PumpAndJitoUtils] Using blockhash: ${recentBlockhashData.blockhash.slice(0, 8)}... Valid until: ${recentBlockhashData.lastValidBlockHeight}`);
 
     for (let i = 0; i < rawTransactionsFromApi.length; i++) {
         const rawTxString = rawTransactionsFromApi[i];
@@ -185,41 +187,47 @@ async function preparePumpTransactionsForJito(rawTransactionsFromApi, walletBatc
         try {
             const transactionBytes = bs58Decoder.decode(rawTxString);
             const deserializedTx = VersionedTransaction.deserialize(transactionBytes);
-            deserializedTx.message.recentBlockhash = recentBlockhash;
+            
+            // MONOCODE Fix: Use full blockhash data matching the working test pattern
+            deserializedTx.message.recentBlockhash = recentBlockhashData.blockhash;
 
-            // Ensure payer is set correctly
-            if (!deserializedTx.message.payerKey || deserializedTx.message.payerKey.toBase58() !== wallet.keypair.publicKey.toBase58()){
-                console.log(`  ${txLabel}: PayerKey from API was ${deserializedTx.message.payerKey?.toBase58()}, setting to wallet ${wallet.keypair.publicKey.toBase58()}.`);
+            // MONOCODE Fix: Ensure payer is set correctly - critical for transaction validation
+            if (!deserializedTx.message.payerKey || deserializedTx.message.payerKey.toBase58() !== wallet.keypair.publicKey.toBase58()) {
+                console.log(`  ${txLabel}: PayerKey from API was ${deserializedTx.message.payerKey?.toBase58() || 'undefined'}, setting to wallet ${wallet.keypair.publicKey.toBase58()}.`);
                 deserializedTx.message.payerKey = wallet.keypair.publicKey;
             }
 
-            const signers = [wallet.keypair];
-            // MONOCODE Fix: Use transaction index instead of parsing compiled instructions
-            // Based on Pump Portal documentation, create transactions need both wallet and mint keypair signatures
-            // In our service, the first transaction (index 0) is always the create transaction
+            // MONOCODE Fix: Match working test signer order - critical for transaction validation
+            let signers = [];
             if (mintKeypair && i === 0) {
-                console.log(`  ${txLabel}: Identified as create transaction (index 0), adding mintKeypair signature.`);
-                signers.push(mintKeypair);
+                // For create transactions (index 0), match test pattern: [mintKeypair, devWallet.keypair]
+                console.log(`  ${txLabel}: Identified as create transaction (index 0), using test pattern signer order: [mintKeypair, wallet.keypair]`);
+                signers = [mintKeypair, wallet.keypair];
+            } else {
+                // For buy transactions, just use the wallet keypair
+                signers = [wallet.keypair];
             }
             
-                    deserializedTx.sign(signers);
-        console.log(`  ${txLabel} signed. Payer: ${deserializedTx.message.payerKey.toBase58()}, Signatures: ${deserializedTx.signatures.filter(s => s && !s.every(b => b === 0)).length} (valid) of ${signers.length} expected.`);
-        
-        if (!deserializedTx.signatures[0] || deserializedTx.signatures[0].every(byte => byte === 0)) {
-            throw new Error(`Signing ${txLabel} failed or produced an empty primary signature.`);
-        }
-        // Additional signature check if more signers were expected
-        if (signers.length > 1 && (!deserializedTx.signatures[1] || deserializedTx.signatures[1].every(byte => byte === 0))){
-            console.warn(`  ${txLabel}: Expected ${signers.length} signatures, but secondary signature might be missing or invalid.`);
-            // Depending on strictness, this could be an error.
-        }
+            deserializedTx.sign(signers);
+            console.log(`  ${txLabel} signed. Payer: ${deserializedTx.message.payerKey.toBase58()}, Signatures: ${deserializedTx.signatures.filter(s => s && !s.every(b => b === 0)).length} (valid) of ${signers.length} expected.`);
+            
+            if (!deserializedTx.signatures[0] || deserializedTx.signatures[0].every(byte => byte === 0)) {
+                throw new Error(`Signing ${txLabel} failed or produced an empty primary signature.`);
+            }
+            
+            // Additional signature validation for create transactions
+            if (signers.length > 1) {
+                if (!deserializedTx.signatures[1] || deserializedTx.signatures[1].every(byte => byte === 0)) {
+                    throw new Error(`${txLabel}: Expected ${signers.length} signatures, but secondary signature (mintKeypair) is missing or invalid.`);
+                }
+            }
 
-        // MONOCODE Fix: Capture primary signature before serialization for WebSocket confirmation
-        const primarySignature = bs58Decoder.encode(deserializedTx.signatures[0]);
-        primarySignatures.push(primarySignature);
+            // MONOCODE Fix: Capture primary signature before serialization for WebSocket confirmation
+            const primarySignature = bs58Decoder.encode(deserializedTx.signatures[0]);
+            primarySignatures.push(primarySignature);
 
-        signedEncodedTransactions.push(bs58Decoder.encode(deserializedTx.serialize()));
-        console.log(`  ${txLabel} prepared for Jito bundle.`);
+            signedEncodedTransactions.push(bs58Decoder.encode(deserializedTx.serialize()));
+            console.log(`  ${txLabel} prepared for Jito bundle. Primary signature: ${primarySignature.slice(0, 8)}...`);
 
         } catch (error) {
             console.error(`  Error processing ${txLabel}:`, error.message);

@@ -290,7 +290,8 @@ async function createAndBuyService(
         }
 
         // 6. Prepare and Sign Transactions for Jito
-        const { blockhash } = await getRecentBlockhash(connection);
+        const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
+        console.log(`[PumpService] Using fresh blockhash: ${blockhash.slice(0, 8)}... Valid until: ${lastValidBlockHeight}`);
         
         const walletKeypairsForSigning = walletSignerMap.map(item => ({
             name: item.wallet.name,
@@ -298,10 +299,13 @@ async function createAndBuyService(
             publicKey: item.wallet.publicKey
         }));
 
+        // MONOCODE Fix: Pass full blockhash data to match working test pattern
+        const recentBlockhashData = { blockhash, lastValidBlockHeight };
+        
         const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
             rawTransactionsFromApi,
             walletKeypairsForSigning, // This expects array of {name, keypair, publicKey}
-            blockhash,
+            recentBlockhashData, // Pass full blockhash data
             mintKeypair // Mint keypair signs the create transaction
         );
         
@@ -442,13 +446,16 @@ async function batchBuyService(
                     throw new Error(`Mismatch in transactions from Pump Portal for batch ${i + 1}.`);
                 }
 
-                const { blockhash } = await getRecentBlockhash(connection);
+                const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
                 const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet); 
 
+                // MONOCODE Fix: Pass full blockhash data to match working test pattern
+                const recentBlockhashData = { blockhash, lastValidBlockHeight };
+                
                 const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
                     rawTransactionsFromApi,
                     walletKeypairsForSigning,
-                    blockhash,
+                    recentBlockhashData, // Pass full blockhash data
                     null // No mintKeypair for buys
                 );
                 
@@ -556,13 +563,16 @@ async function devSellService(
             throw new Error("Expected 1 transaction from Pump Portal for dev sell.");
         }
 
-        const { blockhash } = await getRecentBlockhash(connection);
+        const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
         const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet);
+
+        // MONOCODE Fix: Pass full blockhash data to match working test pattern
+        const recentBlockhashData = { blockhash, lastValidBlockHeight };
 
         const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
             rawTransactionsFromApi,
             walletKeypairsForSigning,
-            blockhash,
+            recentBlockhashData, // Pass full blockhash data
             null // No mintKeypair for sells
         );
 
@@ -691,13 +701,16 @@ async function batchSellService(
                     throw new Error(`Mismatch in transactions from Pump Portal for batch ${i + 1}.`);
                 }
 
-                const { blockhash } = await getRecentBlockhash(connection);
+                const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
                 const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet);
+
+                // MONOCODE Fix: Pass full blockhash data to match working test pattern
+                const recentBlockhashData = { blockhash, lastValidBlockHeight };
 
                 const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
                     rawTransactionsFromApi,
                     walletKeypairsForSigning,
-                    blockhash,
+                    recentBlockhashData, // Pass full blockhash data
                     null // No mintKeypair for sells
                 );
                 
