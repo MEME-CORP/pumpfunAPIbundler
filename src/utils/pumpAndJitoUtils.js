@@ -187,18 +187,11 @@ async function preparePumpTransactionsForJito(rawTransactionsFromApi, walletBatc
             }
 
             const signers = [wallet.keypair];
-            // Check if this is a create transaction that needs the mintKeypair signature
-            // This is a heuristic based on the presence of mintKeypair. A more robust way would be to inspect txArgs if available here.
-            if (mintKeypair && deserializedTx.message.compiledInstructions && deserializedTx.message.compiledInstructions.some(ix => {
-                // A simple check, real create instruction might be complex.
-                // This assumes the create instruction involves the mint public key in its accounts.
-                const programId = deserializedTx.message.accountKeys[ix.programIdIndex].toBase58();
-                // The actual pump program ID is not fixed/publicly known from their docs for local check.
-                // For now, if mintKeypair is provided, we assume it's a create and needs its signature.
-                // A more robust check would be to know the program ID or the structure of create instruction.
-                return ix.accounts.some(accIndex => deserializedTx.message.accountKeys[accIndex].equals(mintKeypair.publicKey));
-            })) {
-                console.log(`  ${txLabel}: Identified as a create-like transaction, adding mintKeypair signature.`);
+            // MONOCODE Fix: Use transaction index instead of parsing compiled instructions
+            // Based on Pump Portal documentation, create transactions need both wallet and mint keypair signatures
+            // In our service, the first transaction (index 0) is always the create transaction
+            if (mintKeypair && i === 0) {
+                console.log(`  ${txLabel}: Identified as create transaction (index 0), adding mintKeypair signature.`);
                 signers.push(mintKeypair);
             }
             
