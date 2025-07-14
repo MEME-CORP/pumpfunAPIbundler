@@ -167,6 +167,7 @@ async function getTransactionsFromPumpPortal(transactionArgs) {
  */
 async function preparePumpTransactionsForJito(rawTransactionsFromApi, walletBatch, recentBlockhash, mintKeypair) {
     const signedEncodedTransactions = [];
+    const primarySignatures = []; // MONOCODE Fix: Track primary signatures for WebSocket confirmation
     const connection = getSolanaConnection(); // Get a connection instance
 
     for (let i = 0; i < rawTransactionsFromApi.length; i++) {
@@ -195,20 +196,24 @@ async function preparePumpTransactionsForJito(rawTransactionsFromApi, walletBatc
                 signers.push(mintKeypair);
             }
             
-            deserializedTx.sign(signers);
-            console.log(`  ${txLabel} signed. Payer: ${deserializedTx.message.payerKey.toBase58()}, Signatures: ${deserializedTx.signatures.filter(s => s && !s.every(b => b === 0)).length} (valid) of ${signers.length} expected.`);
-            
-            if (!deserializedTx.signatures[0] || deserializedTx.signatures[0].every(byte => byte === 0)) {
-                throw new Error(`Signing ${txLabel} failed or produced an empty primary signature.`);
-            }
-            // Additional signature check if more signers were expected
-            if (signers.length > 1 && (!deserializedTx.signatures[1] || deserializedTx.signatures[1].every(byte => byte === 0))){
-                console.warn(`  ${txLabel}: Expected ${signers.length} signatures, but secondary signature might be missing or invalid.`);
-                // Depending on strictness, this could be an error.
-            }
+                    deserializedTx.sign(signers);
+        console.log(`  ${txLabel} signed. Payer: ${deserializedTx.message.payerKey.toBase58()}, Signatures: ${deserializedTx.signatures.filter(s => s && !s.every(b => b === 0)).length} (valid) of ${signers.length} expected.`);
+        
+        if (!deserializedTx.signatures[0] || deserializedTx.signatures[0].every(byte => byte === 0)) {
+            throw new Error(`Signing ${txLabel} failed or produced an empty primary signature.`);
+        }
+        // Additional signature check if more signers were expected
+        if (signers.length > 1 && (!deserializedTx.signatures[1] || deserializedTx.signatures[1].every(byte => byte === 0))){
+            console.warn(`  ${txLabel}: Expected ${signers.length} signatures, but secondary signature might be missing or invalid.`);
+            // Depending on strictness, this could be an error.
+        }
 
-            signedEncodedTransactions.push(bs58Decoder.encode(deserializedTx.serialize()));
-            console.log(`  ${txLabel} prepared for Jito bundle.`);
+        // MONOCODE Fix: Capture primary signature before serialization for WebSocket confirmation
+        const primarySignature = bs58Decoder.encode(deserializedTx.signatures[0]);
+        primarySignatures.push(primarySignature);
+
+        signedEncodedTransactions.push(bs58Decoder.encode(deserializedTx.serialize()));
+        console.log(`  ${txLabel} prepared for Jito bundle.`);
 
         } catch (error) {
             console.error(`  Error processing ${txLabel}:`, error.message);
@@ -216,7 +221,7 @@ async function preparePumpTransactionsForJito(rawTransactionsFromApi, walletBatc
             throw error; // Propagate error to stop batch processing
         }
     }
-    return signedEncodedTransactions;
+    return { signedEncodedTransactions, primarySignatures };
 }
 
 

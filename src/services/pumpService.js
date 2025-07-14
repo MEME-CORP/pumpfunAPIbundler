@@ -20,7 +20,7 @@ const {
     DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE,
     DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL
 } = require('../utils/pumpAndJitoUtils');
-const { sendJitoBundleWithRetries, pollBundleStatus, sleep, getRecentBlockhash } = require('../utils/transactionUtils');
+const { sendJitoBundleWithRetries, pollBundleStatus, waitForBundleViaWebSocket, sleep, getRecentBlockhash } = require('../utils/transactionUtils');
 
 // MONOCODE Compliance: Fix bs58 decoder compatibility issue
 const bs58Decoder = bs58.default || bs58;
@@ -298,7 +298,7 @@ async function createAndBuyService(
             publicKey: item.wallet.publicKey
         }));
 
-        const signedEncodedTransactions = await preparePumpTransactionsForJito(
+        const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
             rawTransactionsFromApi,
             walletKeypairsForSigning, // This expects array of {name, keypair, publicKey}
             blockhash,
@@ -320,19 +320,23 @@ async function createAndBuyService(
         results.bundleId = bundleId;
         console.log(`Bundle sent with ID: ${bundleId}`);
 
-        // 8. Poll Bundle Status
-        const bundleConfirmed = await pollBundleStatus(bundleId);
-        if (bundleConfirmed) {
-            results.success = true;
-            results.message = `Token ${tokenMetadata.symbol} created and initial buys completed successfully in bundle ${bundleId}. Mint: ${results.mintAddress}`;
-            console.log(results.message);
-            // Save mint address
-            await fs.mkdir(path.dirname(LATEST_MINT_FILE), { recursive: true });
-            await fs.writeFile(LATEST_MINT_FILE, results.mintAddress);
-            console.log(`Saved new mint address to ${LATEST_MINT_FILE}`);
-        } else {
-            throw new Error(`Bundle ${bundleId} did not confirm or failed.`);
+        // 8. WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
+        console.log(`[PumpService] Waiting for bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
+        try {
+            await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
+            console.log(`[PumpService] ✅ Bundle confirmed successfully via WebSocket!`);
+        } catch (error) {
+            throw new Error(`Bundle ${bundleId} WebSocket confirmation failed: ${error.message}`);
         }
+        
+        results.success = true;
+        results.message = `Token ${tokenMetadata.symbol} created and initial buys completed successfully in bundle ${bundleId}. Mint: ${results.mintAddress}`;
+        console.log(results.message);
+        // Save mint address
+        await fs.mkdir(path.dirname(LATEST_MINT_FILE), { recursive: true });
+        await fs.writeFile(LATEST_MINT_FILE, results.mintAddress);
+        console.log(`Saved new mint address to ${LATEST_MINT_FILE}`);
+        
 
     } catch (error) {
         console.error("Error in createAndBuyService:", error);
@@ -441,7 +445,7 @@ async function batchBuyService(
                 const { blockhash } = await getRecentBlockhash(connection);
                 const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet); 
 
-                const signedEncodedTransactions = await preparePumpTransactionsForJito(
+                const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
                     rawTransactionsFromApi,
                     walletKeypairsForSigning,
                     blockhash,
@@ -462,14 +466,16 @@ async function batchBuyService(
                 batchBundleResult.bundleId = bundleId;
                 console.log(`Batch ${i + 1} bundle sent with ID: ${bundleId}`);
 
-                const bundleConfirmed = await pollBundleStatus(bundleId);
-                if (bundleConfirmed) {
+                // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
+                console.log(`[PumpService] Waiting for batch ${i + 1} bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
+                try {
+                    await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
                     batchBundleResult.success = true;
                     batchBundleResult.message = `Batch ${i + 1} buy successful.`;
                     overallResult.successfulBundles++;
-                    console.log(batchBundleResult.message);
-                } else {
-                    throw new Error(`Bundle ${bundleId} for batch ${i + 1} did not confirm or failed.`);
+                    console.log(`[PumpService] ✅ Batch ${i + 1} bundle confirmed successfully via WebSocket!`);
+                } catch (error) {
+                    throw new Error(`Bundle ${bundleId} for batch ${i + 1} WebSocket confirmation failed: ${error.message}`);
                 }
             } catch (batchError) {
                 console.error(`Error processing batch ${i + 1}:`, batchError);
@@ -553,7 +559,7 @@ async function devSellService(
         const { blockhash } = await getRecentBlockhash(connection);
         const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet);
 
-        const signedEncodedTransactions = await preparePumpTransactionsForJito(
+        const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
             rawTransactionsFromApi,
             walletKeypairsForSigning,
             blockhash,
@@ -572,13 +578,15 @@ async function devSellService(
         result.bundleId = bundleId;
         console.log(`DevWallet sell bundle sent with ID: ${bundleId}`);
 
-        const bundleConfirmed = await pollBundleStatus(bundleId);
-        if (bundleConfirmed) {
+        // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
+        console.log(`[PumpService] Waiting for DevWallet sell bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
+        try {
+            await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
             result.success = true;
             result.message = `DevWallet successfully sold ${sellAmountPercentage} of ${mintAddress}. Bundle ID: ${bundleId}`;
-            console.log(result.message);
-        } else {
-            throw new Error(`DevWallet sell bundle ${bundleId} did not confirm or failed.`);
+            console.log(`[PumpService] ✅ DevWallet sell bundle confirmed successfully via WebSocket!`);
+        } catch (error) {
+            throw new Error(`DevWallet sell bundle ${bundleId} WebSocket confirmation failed: ${error.message}`);
         }
 
     } catch (error) {
@@ -686,7 +694,7 @@ async function batchSellService(
                 const { blockhash } = await getRecentBlockhash(connection);
                 const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet);
 
-                const signedEncodedTransactions = await preparePumpTransactionsForJito(
+                const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
                     rawTransactionsFromApi,
                     walletKeypairsForSigning,
                     blockhash,
@@ -707,14 +715,16 @@ async function batchSellService(
                 batchBundleResult.bundleId = bundleId;
                 console.log(`Batch ${i + 1} bundle sent with ID: ${bundleId}`);
 
-                const bundleConfirmed = await pollBundleStatus(bundleId);
-                if (bundleConfirmed) {
+                // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
+                console.log(`[PumpService] Waiting for batch ${i + 1} sell bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
+                try {
+                    await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
                     batchBundleResult.success = true;
                     batchBundleResult.message = `Batch ${i + 1} sell successful.`;
                     overallResult.successfulBundles++;
-                    console.log(batchBundleResult.message);
-                } else {
-                    throw new Error(`Bundle ${bundleId} for batch ${i + 1} did not confirm or failed.`);
+                    console.log(`[PumpService] ✅ Batch ${i + 1} sell bundle confirmed successfully via WebSocket!`);
+                } catch (error) {
+                    throw new Error(`Bundle ${bundleId} for batch ${i + 1} WebSocket confirmation failed: ${error.message}`);
                 }
             } catch (batchError) {
                 console.error(`Error processing batch ${i + 1}:`, batchError);

@@ -903,6 +903,100 @@ async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = 
 }
 
 /**
+ * Waits for a bundle to be confirmed via WebSocket on the first transaction signature.
+ * MONOCODE Fix: Eliminates Jito rate limiting by using WebSocket confirmation instead of polling.
+ * Since Jito bundles are atomic, confirming the first transaction confirms the entire bundle.
+ * @param {web3.Connection} connection - Solana connection object
+ * @param {string} firstSignature - The first transaction signature in the bundle
+ * @param {web3.Commitment} [commitment='confirmed'] - Commitment level
+ * @param {number} [timeoutMs] - Timeout in milliseconds (defaults to RPC config)
+ * @returns {Promise<void>} Resolves when bundle is confirmed, rejects on timeout/error
+ */
+async function waitForBundleViaWebSocket(connection, firstSignature, commitment = 'confirmed', timeoutMs = null) {
+    const timeout = timeoutMs || currentRpcConfig.confirmationTimeout;
+    console.log(`[TransactionUtils] Waiting for bundle confirmation via WebSocket on signature: ${firstSignature.slice(0, 8)}...`);
+    
+    return new Promise((resolve, reject) => {
+        let subscriptionId = null;
+        let timeoutId = null;
+        let resolved = false;
+        
+        const cleanup = () => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            if (subscriptionId) {
+                const subId = subscriptionId;
+                subscriptionId = null;
+                connection.removeSignatureListener(subId).catch(() => {});
+            }
+        };
+        
+        const handleResult = (result, isTimeout = false) => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            
+            if (isTimeout) {
+                reject(new Error(`Bundle WebSocket confirmation timed out after ${timeout}ms`));
+            } else if (result.err) {
+                reject(new Error(`Bundle transaction failed: ${JSON.stringify(result.err)}`));
+            } else {
+                console.log(`[TransactionUtils] ✅ Bundle confirmed via WebSocket! First transaction reached chain.`);
+                resolve();
+            }
+        };
+        
+        try {
+            // Set up WebSocket listener for the first transaction signature
+            subscriptionId = connection.onSignatureWithOptions(
+                firstSignature,
+                (notificationResult, context) => {
+                    console.log(`[TransactionUtils] Bundle WebSocket notification received for signature: ${firstSignature.slice(0, 8)}... in slot: ${context.slot}`);
+                    handleResult(notificationResult);
+                },
+                { commitment: commitment }
+            );
+            
+            // Set timeout with fallback RPC check
+            timeoutId = setTimeout(async () => {
+                if (resolved) return;
+                
+                console.log(`[TransactionUtils] Bundle WebSocket timeout reached, doing final RPC check...`);
+                
+                try {
+                    const statusResult = await rateLimitedRpcCall(async () => {
+                        return await connection.getSignatureStatus(firstSignature);
+                    });
+                    
+                    if (statusResult && statusResult.value) {
+                        const status = statusResult.value;
+                        const isConfirmed = status.confirmationStatus === commitment || 
+                                           (commitment === 'confirmed' && status.confirmationStatus === 'finalized');
+                        
+                        if (isConfirmed && !status.err) {
+                            console.log(`[TransactionUtils] ✅ Bundle confirmed by fallback RPC check!`);
+                            handleResult(status);
+                            return;
+                        }
+                    }
+                    
+                    handleResult(null, true); // Timeout
+                } catch (error) {
+                    console.warn(`[TransactionUtils] Bundle fallback RPC check failed: ${error.message}`);
+                    handleResult(null, true); // Timeout
+                }
+            }, timeout);
+            
+        } catch (error) {
+            cleanup();
+            reject(error);
+        }
+    });
+}
+
+/**
  * Polls Jito for the status of a bundle.
  * Enhanced with improved error context and adaptive timing.
  * @param {string} bundleId - The ID of the bundle to poll.
@@ -1007,6 +1101,7 @@ module.exports = {
     // Jito functions (preserved)
     sendJitoBundleWithRetries,
     pollBundleStatus,
+    waitForBundleViaWebSocket, // MONOCODE Fix: WebSocket-based bundle confirmation
     // Make constants available for configuration if needed by services
     MAX_RETRIES_JITO_SEND,
     INITIAL_RETRY_DELAY_JITO_SEND,
