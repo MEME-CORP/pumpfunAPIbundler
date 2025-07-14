@@ -8,7 +8,7 @@ const { getSolanaConnection } = require('./walletUtils');
 // Constants for Pump Portal (can be made configurable)
 const PUMP_PORTAL_API_URL = 'https://pumpportal.fun/api';
 const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = `${PUMP_PORTAL_API_URL}/trade-local`;
-const PUMP_PORTAL_IPFS_ENDPOINT = `${PUMP_PORTAL_API_URL}/ipfs`;
+const PUMP_PORTAL_IPFS_ENDPOINT = 'https://pump.fun/api/ipfs'; // MONOCODE Fix: Correct domain for IPFS upload
 
 // Default Jito tip for pump.fun transactions (can be overridden by specific services)
 const DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE = 0.001; // As determined successful
