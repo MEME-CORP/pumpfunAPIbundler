@@ -824,7 +824,7 @@ const INITIAL_RETRY_DELAY_JITO_SEND = 2000;
 const MAX_RETRY_DELAY_JITO_SEND = 30000;
 const BUNDLE_STATUS_POLL_INTERVAL = 2000;
 const BUNDLE_STATUS_POLL_ATTEMPTS = 10; // Default, can be overridden
-const JITO_REGIONAL_ENDPOINT = 'https://ny.mainnet.block-engine.jito.wtf/api/v1/bundles'; // Default, can be overridden
+const JITO_REGIONAL_ENDPOINT = 'https://mainnet.block-engine.jito.wtf/api/v1/bundles'; // Default, can be overridden
 
 /**
  * Sends a bundle of transactions to the Jito Block Engine with retries.
