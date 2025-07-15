@@ -14,10 +14,31 @@ async function createAndBuy(req, res) {
             telegram, 
             website,
             showName, // boolean
-            createAmountSOL, // number, SOL amount for token creation (e.g., 0.001)
             imageFileName, // uploaded file name, server will map to a path
-            slippageBps // number, e.g. 2500 for 25%
         } = req.body;
+        
+        // Parse numeric fields from multipart form data (they come as strings)
+        let createAmountSOL = req.body.createAmountSOL;
+        let slippageBps = req.body.slippageBps;
+        
+        // Convert createAmountSOL to number if provided
+        if (createAmountSOL !== undefined) {
+            createAmountSOL = parseFloat(createAmountSOL);
+            if (isNaN(createAmountSOL) || createAmountSOL <= 0) {
+                return res.status(400).json({ message: 'Invalid createAmountSOL: must be a positive number.' });
+            }
+        }
+        
+        // Convert slippageBps to number if provided
+        if (slippageBps !== undefined) {
+            slippageBps = parseInt(slippageBps);
+            if (isNaN(slippageBps) || slippageBps <= 0) {
+                return res.status(400).json({ message: 'Invalid slippageBps: must be a positive integer.' });
+            }
+        }
+        
+        // Log parsed numeric values for debugging
+        console.log(`[PumpController] Parsed numeric fields: createAmountSOL=${createAmountSOL}, slippageBps=${slippageBps}`);
 
         // MONOCODE Compliance: Handle multipart/form-data parsing for JSON fields
         // In multipart requests, JSON objects and arrays arrive as strings and need parsing
