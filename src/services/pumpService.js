@@ -220,7 +220,19 @@ async function createAndBuyService(
         } else {
             console.log(`[PumpService] No image provided. Creating token with metadata only.`);
         }
-        results.metadataUri = await uploadMetadataToPumpPortal(tokenMetadata, imageBuffer, imageFileName);
+        
+        // Filter tokenMetadata to only include fields needed for IPFS metadata (exclude createAmountSOL)
+        const metadataForUpload = {
+            name: tokenMetadata.name,
+            symbol: tokenMetadata.symbol,
+            description: tokenMetadata.description,
+            twitter: tokenMetadata.twitter,
+            telegram: tokenMetadata.telegram,
+            website: tokenMetadata.website,
+            showName: tokenMetadata.showName
+        };
+        
+        results.metadataUri = await uploadMetadataToPumpPortal(metadataForUpload, imageBuffer, imageFileName);
         console.log(`Token metadata uploaded to IPFS: ${results.metadataUri}`);
 
         // 3. Generate Mint Keypair
