@@ -13,7 +13,7 @@ const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = `${PUMP_PORTAL_API_URL}/trade-local`;
 
 // Default Jito tip for pump.fun transactions (can be overridden by specific services)
 const DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE = 0.001; // As determined successful
-const DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL = 0;
+const DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL = 0.00005; // Follow documentation pattern: small fee for subsequent TXs
 
 const bs58Decoder = bs58.default || bs58;
 
