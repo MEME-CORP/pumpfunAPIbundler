@@ -112,7 +112,7 @@ async function checkWalletBalancesForTokenOperations(wallets, operationOptions =
  * MONOCODE Compliance: Updated to handle image buffers and API-provided wallets
  */
 async function createAndBuyService(
-    tokenMetadata, // { name, symbol, description, twitter, telegram, website, showName }
+    tokenMetadata, // { name, symbol, description, twitter, telegram, website, showName, createAmountSOL }
     imageData, // { buffer: Buffer, fileName: string, mimetype: string, size: number } or null
     wallets, // Array of { name: string, privateKey: string } - API-provided wallets
     buyAmountsSOL, // { devWalletBuySOL: 0.01, firstBundledWallet1BuySOL: 0.01, ... } up to 4 first bundled
@@ -194,9 +194,11 @@ async function createAndBuyService(
             }
         }, []);
 
-        // Calculate SOL spend per wallet for validation (sum of buy amounts)
+        // Calculate SOL spend per wallet for validation (sum of buy amounts + create amount for DevWallet)
+        const devWalletCreateAmount = tokenMetadata.createAmountSOL || 0.001;
+        const devWalletTotalSpend = devWalletCreateAmount + (buyAmountsSOL.devWalletBuySOL || 0);
         const maxBuyAmount = Math.max(
-            buyAmountsSOL.devWalletBuySOL || 0,
+            devWalletTotalSpend, // DevWallet spends on both create and buy
             ...Object.keys(buyAmountsSOL)
                 .filter(key => key.startsWith('firstBundledWallet'))
                 .map(key => buyAmountsSOL[key] || 0)
@@ -227,6 +229,10 @@ async function createAndBuyService(
         console.log(`New token mint address: ${results.mintAddress}`);
 
         // 4. Construct bundledTxArgs for Pump Portal
+        // MONOCODE Fix: Ensure correct format for pump.fun API
+        // - slippage: Convert basis points to percentage (2500 -> 25)
+        // - priorityFee: Keep as SOL (0.001, not 1000000 lamports)
+        // - amount: Keep as SOL when denominatedInSol=true (0.005, not "5000000" lamports)
         const bundledTxArgs = [];
         const walletSignerMap = []; // To map raw tx to keypair for signing
 
@@ -240,10 +246,10 @@ async function createAndBuyService(
                 uri: results.metadataUri,
             },
             mint: results.mintAddress,
-            denominatedInSol: "false", // As per pump.fun example for create
-            amount: tokenMetadata.initialSupplyAmount || "1000000000", // Example total supply, make configurable
-            slippage: slippageBps.toString(), // Pump portal expects string for slippage (basis points)
-            priorityFee: DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE * LAMPORTS_PER_SOL, // Tip in lamports
+            denominatedInSol: "true", // Match working test format - create with SOL amount
+            amount: tokenMetadata.createAmountSOL || 0.001, // SOL amount for token creation (default 0.001 SOL)
+            slippage: Math.floor(slippageBps / 100), // Convert basis points to percentage (2500 -> 25)
+            priorityFee: DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE, // Keep as SOL, don't convert to lamports
             pool: "pump",
         });
         walletSignerMap.push({ wallet: devWallet, isCreate: true });
@@ -275,9 +281,9 @@ async function createAndBuyService(
                 action: "buy",
                 mint: results.mintAddress,
                 denominatedInSol: "true", // Buying with SOL
-                amount: (buyerInfo.buySOL * LAMPORTS_PER_SOL).toString(), // Amount in lamports as string
-                slippage: slippageBps.toString(),
-                priorityFee: DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL * LAMPORTS_PER_SOL, // Nominal fee for subsequent txs
+                amount: buyerInfo.buySOL, // Keep as SOL, don't convert to lamports
+                slippage: Math.floor(slippageBps / 100), // Convert basis points to percentage (2500 -> 25)
+                priorityFee: DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL, // Keep as SOL, don't convert to lamports
                 pool: "pump",
             });
             walletSignerMap.push({ wallet: buyerInfo.wallet, isCreate: false });
@@ -398,7 +404,6 @@ async function batchBuyService(
 
         console.log(`Attempting batch buy for ${mintAddress} with ${eligibleWallets.length} eligible wallets.`);
 
-        const lamportsPerWallet = solAmountPerWallet * LAMPORTS_PER_SOL;
         const numBatches = Math.ceil(eligibleWallets.length / MAX_WALLETS_PER_BUNDLE);
 
         for (let i = 0; i < numBatches; i++) {
@@ -433,9 +438,9 @@ async function batchBuyService(
                         action: "buy",
                         mint: mintAddress,
                         denominatedInSol: "true",
-                        amount: lamportsPerWallet.toString(),
-                        slippage: slippageBps.toString(),
-                        priorityFee: (index === 0 ? DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE : DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL) * LAMPORTS_PER_SOL,
+                        amount: solAmountPerWallet, // Keep as SOL, don't convert to lamports
+                        slippage: Math.floor(slippageBps / 100), // Convert basis points to percentage (2500 -> 25)
+                        priorityFee: index === 0 ? DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE : DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL, // Keep as SOL, don't convert to lamports
                         pool: "pump",
                     });
                     walletSignerMap.push({ wallet, isCreate: false });
@@ -551,8 +556,8 @@ async function devSellService(
             mint: mintAddress,
             denominatedInSol: "false", // Selling tokens
             amount: sellAmountPercentage, // Pump Portal API supports percentage string like "50%"
-            slippage: slippageBps.toString(),
-            priorityFee: DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE * LAMPORTS_PER_SOL,
+            slippage: Math.floor(slippageBps / 100), // Convert basis points to percentage (2500 -> 25)
+            priorityFee: DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE, // Keep as SOL, don't convert to lamports
             pool: "pump",
         }];
         
@@ -689,8 +694,8 @@ async function batchSellService(
                         mint: mintAddress,
                         denominatedInSol: "false", // Selling tokens
                         amount: sellAmountPercentage,
-                        slippage: slippageBps.toString(),
-                        priorityFee: (index === 0 ? DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE : DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL) * LAMPORTS_PER_SOL,
+                        slippage: Math.floor(slippageBps / 100), // Convert basis points to percentage (2500 -> 25)
+                        priorityFee: index === 0 ? DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE : DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL, // Keep as SOL, don't convert to lamports
                         pool: "pump",
                     });
                     walletSignerMap.push({ wallet, isCreate: false });

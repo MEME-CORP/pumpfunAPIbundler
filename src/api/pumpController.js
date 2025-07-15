@@ -14,7 +14,7 @@ async function createAndBuy(req, res) {
             telegram, 
             website,
             showName, // boolean
-            initialSupplyAmount, // string, e.g., "1000000000"
+            createAmountSOL, // number, SOL amount for token creation (e.g., 0.001)
             imageFileName, // uploaded file name, server will map to a path
             slippageBps // number, e.g. 2500 for 25%
         } = req.body;
@@ -70,7 +70,7 @@ async function createAndBuy(req, res) {
             }
         }
 
-        const tokenMetadata = { name, symbol, description, twitter, telegram, website, showName, initialSupplyAmount };
+        const tokenMetadata = { name, symbol, description, twitter, telegram, website, showName, createAmountSOL };
         
         // Handle image upload - Now using multer memory storage
         // MONOCODE Compliance: Explicit Error Handling and Observable Implementation

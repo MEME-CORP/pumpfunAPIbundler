@@ -230,7 +230,7 @@ The API now supports secure image uploads for token creation using multipart/for
     telegram: string (optional)
     website: string (optional)
     showName: boolean (required)
-    initialSupplyAmount: string (optional, default: "1000000000")
+    createAmountSOL: number (optional, default: 0.001) - SOL amount for token creation
     buyAmountsSOL: JSON string (required) - Must be valid JSON format
     wallets: JSON string (required) - Array of wallet objects with name and privateKey
     slippageBps: number (optional, default: 2500)
@@ -239,6 +239,11 @@ The API now supports secure image uploads for token creation using multipart/for
     ```
     image: file (optional) - Image file for the token (PNG, JPG, GIF, etc.)
     ```
+- **Important Parameter Details:**
+  - **createAmountSOL**: SOL amount for token creation (e.g., 0.001 for 0.001 SOL). This is the amount DevWallet spends to create the token.
+  - **buyAmountsSOL**: Must be a JSON string with SOL amounts (e.g., `{"devWalletBuySOL":0.01,"firstBundledWallet1BuySOL":0.01}`)
+  - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%, 1000 = 10%). API converts to percentage format for pump.fun
+  - **Priority fees**: Handled automatically by the API - no need to specify
 - **Example cURL:**
   ```bash
   curl -X POST http://localhost:3000/api/pump/create-and-buy \
@@ -246,6 +251,8 @@ The API now supports secure image uploads for token creation using multipart/for
     -F "symbol=MTK" \
     -F "description=A great token" \
     -F "showName=true" \
+    -F "createAmountSOL=0.001" \
+    -F "slippageBps=2500" \
     -F "buyAmountsSOL={\"devWalletBuySOL\":0.01,\"firstBundledWallet1BuySOL\":0.01}" \
     -F "wallets=[{\"name\":\"DevWallet\",\"privateKey\":\"base58_private_key_here\"},{\"name\":\"First Bundled Wallet 1\",\"privateKey\":\"base58_private_key_here\"}]" \
     -F "image=@/path/to/token-image.png"
@@ -260,9 +267,9 @@ The API now supports secure image uploads for token creation using multipart/for
     - Buying wallets should be named `"First Bundled Wallet 1"`, `"First Bundled Wallet 2"`, etc.
     - Private keys must be base58 encoded Solana keypairs
   - **Minimum SOL Balance Requirements:**
-    - DevWallet (tipper): Requires **0.055 SOL** minimum + buy amount
+    - DevWallet (tipper): Requires **0.055 SOL** minimum + create amount + buy amount
     - Other wallets: Require **0.025 SOL** minimum + buy amount
-    - Example: For a 0.01 SOL buy, DevWallet needs 0.065 SOL total, other wallets need 0.035 SOL total
+    - Example: For 0.001 SOL create + 0.01 SOL buy, DevWallet needs 0.066 SOL total, other wallets need 0.035 SOL total
 
 #### 2. Batch Buy Token
 - **POST** `/api/pump/batch-buy`
@@ -275,6 +282,9 @@ The API now supports secure image uploads for token creation using multipart/for
     "targetWalletNames": ["Bundled Wallet 5", ...] // optional
   }
   ```
+- **Parameter Details:**
+  - **solAmountPerWallet**: SOL amount each wallet will spend (e.g., 0.01 for 0.01 SOL)
+  - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%). API converts to percentage format for pump.fun
 - **Response:** Bundle results, transaction details, status.
 - **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum + buy amount (tipper wallet needs 0.055 SOL minimum + buy amount)
 
@@ -288,6 +298,9 @@ The API now supports secure image uploads for token creation using multipart/for
     "slippageBps": 2500
   }
   ```
+- **Parameter Details:**
+  - **sellAmountPercentage**: Percentage of tokens to sell (e.g., "50%" or 50)
+  - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%). API converts to percentage format for pump.fun
 - **Response:** Bundle ID, transaction details, status.
 - **Minimum SOL Balance:** DevWallet needs **0.055 SOL** minimum to cover transaction fees and Jito tips
 
@@ -302,6 +315,9 @@ The API now supports secure image uploads for token creation using multipart/for
     "targetWalletNames": ["Bundled Wallet 5", ...] // optional
   }
   ```
+- **Parameter Details:**
+  - **sellAmountPercentage**: Percentage of tokens to sell (e.g., "100%" or 100)
+  - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%). API converts to percentage format for pump.fun
 - **Response:** Bundle results, transaction details, status.
 - **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum (tipper wallet needs 0.055 SOL minimum)
 

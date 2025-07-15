@@ -170,11 +170,11 @@ async function fundChildWalletsService(amountPerWalletSOL, childWallets, motherW
     }
     
     let motherWallet;
-    try {
+        try {
         const secretKey = bs58Decoder.decode(motherWalletPrivateKeyBs58);
-        motherWallet = web3.Keypair.fromSecretKey(secretKey);
-    } catch (e) {
-        throw new Error('Invalid mother wallet private key for funding.');
+            motherWallet = web3.Keypair.fromSecretKey(secretKey);
+        } catch (e) {
+            throw new Error('Invalid mother wallet private key for funding.');
     }
 
     const motherBalance = await getWalletBalance(connection, motherWallet.publicKey);
@@ -205,7 +205,7 @@ async function fundChildWalletsService(amountPerWalletSOL, childWallets, motherW
             });
         } catch (error) {
             throw new Error(`Failed to decode private key for wallet ${name}: ${error.message}`);
-        }
+    }
     }
     
     console.log(`[WalletService] Loaded ${allChildWallets.length} child wallets from API request`);
