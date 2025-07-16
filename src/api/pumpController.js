@@ -153,7 +153,7 @@ async function createAndBuy(req, res) {
 
 async function batchBuy(req, res) {
     try {
-        let { mintAddress, solAmountPerWallet, slippageBps, targetWalletNames } = req.body;
+        let { mintAddress, solAmountPerWallet, slippageBps, targetWalletNames, wallets } = req.body;
 
         if (!mintAddress) {
             // Try to load from LATEST_MINT_FILE if not provided
@@ -173,6 +173,16 @@ async function batchBuy(req, res) {
         if (!solAmountPerWallet || typeof solAmountPerWallet !== 'number' || solAmountPerWallet <= 0) {
             return res.status(400).json({ message: 'Missing or invalid required parameter: solAmountPerWallet (must be a positive number).' });
         }
+        if (!wallets || !Array.isArray(wallets) || wallets.length === 0) {
+            return res.status(400).json({ message: 'Missing required parameter: wallets (array of wallet objects with name and privateKey).' });
+        }
+        
+        // Validate wallet structure
+        for (const wallet of wallets) {
+            if (!wallet.name || !wallet.privateKey) {
+                return res.status(400).json({ message: 'Each wallet must have a name and privateKey.' });
+            }
+        }
         // slippageBps is optional, defaults in service
         // targetWalletNames is optional
 
@@ -180,7 +190,8 @@ async function batchBuy(req, res) {
             mintAddress,
             solAmountPerWallet,
             slippageBps,
-            targetWalletNames
+            targetWalletNames,
+            wallets // Pass wallets to service
         );
 
         if (result.success) {
@@ -197,7 +208,7 @@ async function batchBuy(req, res) {
 
 async function devSell(req, res) {
     try {
-        let { mintAddress, sellAmountPercentage, slippageBps } = req.body;
+        let { mintAddress, sellAmountPercentage, slippageBps, wallets } = req.body;
 
         // Try to load from LATEST_MINT_FILE if mintAddress not provided
         if (!mintAddress) {
@@ -236,11 +247,23 @@ async function devSell(req, res) {
             return res.status(400).json({ message: 'Invalid sellAmountPercentage format. Must be a percentage string (e.g., "50%") or number between 1-100.' });
         }
 
+        if (!wallets || !Array.isArray(wallets) || wallets.length === 0) {
+            return res.status(400).json({ message: 'Missing required parameter: wallets (array of wallet objects with name and privateKey).' });
+        }
+        
+        // Validate wallet structure
+        for (const wallet of wallets) {
+            if (!wallet.name || !wallet.privateKey) {
+                return res.status(400).json({ message: 'Each wallet must have a name and privateKey.' });
+            }
+        }
+
         // Call the service
         const result = await pumpService.devSellService(
             mintAddress,
             sellAmountPercentage,
-            slippageBps
+            slippageBps,
+            wallets // Pass wallets to service
         );
 
         if (result.success) {
@@ -257,7 +280,7 @@ async function devSell(req, res) {
 
 async function batchSell(req, res) {
     try {
-        let { mintAddress, sellAmountPercentage, slippageBps, targetWalletNames } = req.body;
+        let { mintAddress, sellAmountPercentage, slippageBps, targetWalletNames, wallets } = req.body;
 
         // Try to load from LATEST_MINT_FILE if mintAddress not provided
         if (!mintAddress) {
@@ -301,12 +324,24 @@ async function batchSell(req, res) {
             return res.status(400).json({ message: 'targetWalletNames must be an array of wallet names.' });
         }
 
+        if (!wallets || !Array.isArray(wallets) || wallets.length === 0) {
+            return res.status(400).json({ message: 'Missing required parameter: wallets (array of wallet objects with name and privateKey).' });
+        }
+        
+        // Validate wallet structure
+        for (const wallet of wallets) {
+            if (!wallet.name || !wallet.privateKey) {
+                return res.status(400).json({ message: 'Each wallet must have a name and privateKey.' });
+            }
+        }
+
         // Call the service
         const result = await pumpService.batchSellService(
             mintAddress,
             sellAmountPercentage,
             slippageBps,
-            targetWalletNames
+            targetWalletNames,
+            wallets // Pass wallets to service
         );
 
         if (result.success) {

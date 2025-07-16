@@ -279,13 +279,24 @@ The API now supports secure image uploads for token creation using multipart/for
     "mintAddress": "...",
     "solAmountPerWallet": 0.01,
     "slippageBps": 2500,
-    "targetWalletNames": ["Bundled Wallet 5", ...] // optional
+    "targetWalletNames": ["Bundled Wallet 5", ...], // optional
+    "wallets": [
+      {"name": "DevWallet", "privateKey": "base58_private_key_here"},
+      {"name": "First Bundled Wallet 1", "privateKey": "base58_private_key_here"},
+      {"name": "Bundled Wallet 5", "privateKey": "base58_private_key_here"}
+    ]
   }
   ```
 - **Parameter Details:**
   - **solAmountPerWallet**: SOL amount each wallet will spend (e.g., 0.01 for 0.01 SOL)
   - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%). API converts to percentage format for pump.fun
+  - **wallets**: Array of wallet objects with `name` and `privateKey` properties (required for stateless operation)
+  - **targetWalletNames**: Optional filter to only use specific wallets from the provided wallets array
 - **Response:** Bundle results, transaction details, status.
+- **Important Notes:**
+  - **Stateless Operation**: All wallet credentials must be provided in the request
+  - **Eligible Wallets**: Automatically excludes DevWallet and First Bundled Wallets 1-4 from batch buying
+  - **Private Keys**: Must be base58 encoded Solana keypairs
 - **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum + buy amount (tipper wallet needs 0.055 SOL minimum + buy amount)
 
 #### 3. DevWallet Sell
@@ -295,13 +306,21 @@ The API now supports secure image uploads for token creation using multipart/for
   {
     "mintAddress": "...",
     "sellAmountPercentage": "50%", // or 50
-    "slippageBps": 2500
+    "slippageBps": 2500,
+    "wallets": [
+      {"name": "DevWallet", "privateKey": "base58_private_key_here"}
+    ]
   }
   ```
 - **Parameter Details:**
   - **sellAmountPercentage**: Percentage of tokens to sell (e.g., "50%" or 50)
   - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%). API converts to percentage format for pump.fun
+  - **wallets**: Array of wallet objects containing at least the DevWallet (required for stateless operation)
 - **Response:** Bundle ID, transaction details, status.
+- **Important Notes:**
+  - **Stateless Operation**: DevWallet credentials must be provided in the request
+  - **Required Wallet**: The wallets array must contain a wallet named "DevWallet"
+  - **Private Keys**: Must be base58 encoded Solana keypairs
 - **Minimum SOL Balance:** DevWallet needs **0.055 SOL** minimum to cover transaction fees and Jito tips
 
 #### 4. Batch Sell (All Non-DevWallets)
@@ -312,13 +331,24 @@ The API now supports secure image uploads for token creation using multipart/for
     "mintAddress": "...",
     "sellAmountPercentage": "100%", // or 100
     "slippageBps": 2500,
-    "targetWalletNames": ["Bundled Wallet 5", ...] // optional
+    "targetWalletNames": ["Bundled Wallet 5", ...], // optional
+    "wallets": [
+      {"name": "First Bundled Wallet 1", "privateKey": "base58_private_key_here"},
+      {"name": "First Bundled Wallet 2", "privateKey": "base58_private_key_here"},
+      {"name": "Bundled Wallet 5", "privateKey": "base58_private_key_here"}
+    ]
   }
   ```
 - **Parameter Details:**
   - **sellAmountPercentage**: Percentage of tokens to sell (e.g., "100%" or 100)
   - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%). API converts to percentage format for pump.fun
+  - **wallets**: Array of wallet objects with `name` and `privateKey` properties (required for stateless operation)
+  - **targetWalletNames**: Optional filter to only use specific wallets from the provided wallets array
 - **Response:** Bundle results, transaction details, status.
+- **Important Notes:**
+  - **Stateless Operation**: All wallet credentials must be provided in the request
+  - **Excluded Wallets**: Automatically excludes DevWallet from batch selling (use `/api/pump/sell-dev` for DevWallet)
+  - **Private Keys**: Must be base58 encoded Solana keypairs
 - **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum (tipper wallet needs 0.055 SOL minimum)
 
 ---
@@ -328,8 +358,11 @@ The API now supports secure image uploads for token creation using multipart/for
 - All endpoints return JSON.
 - All endpoints perform input validation and return clear error messages on invalid input.
 - All trading endpoints use robust transaction handling, Jito bundles, and follow Solana best practices for reliability.
+- **Fully Stateless Operation**: All trading endpoints now require wallet credentials to be provided in each request - no server-side wallet storage.
 - Private keys are never returned by trading endpoints.
 - All transaction results include bundle IDs and transaction signatures for on-chain verification.
+- **Wallet Parameter Format**: All trading endpoints expect a `wallets` array with objects containing `name` and `privateKey` properties.
+- **Private Key Format**: All private keys must be base58 encoded Solana keypairs.
 - **Minimum SOL Balance Requirements:** All wallets must maintain minimum SOL balances to cover transaction fees, Jito tips, and rent exemption:
   - **DevWallet (tipper):** 0.055 SOL minimum + any buy/sell amounts + 0.00204 SOL rent exemption
   - **Other wallets:** 0.025 SOL minimum + any buy/sell amounts + 0.00204 SOL rent exemption

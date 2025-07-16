@@ -378,7 +378,8 @@ async function batchBuyService(
     mintAddress, 
     solAmountPerWallet, 
     slippageBps = 2500, 
-    targetWalletNames // Optional: array of specific child wallet names to use (must be eligible)
+    targetWalletNames, // Optional: array of specific child wallet names to use (must be eligible)
+    wallets // Required: Array of { name: string, privateKey: string } - API-provided wallets
 ) {
     const connection = getSolanaConnection();
     const overallResult = {
@@ -392,13 +393,30 @@ async function batchBuyService(
     };
 
     try {
-        const allChildWallets = await loadChildWalletsFromFile(CHILD_WALLETS_FILE);
-        if (!allChildWallets || allChildWallets.length === 0) {
-            throw new Error("No child wallets found.");
+        // MONOCODE Fix: Use provided wallets from API request instead of loading from file
+        if (!wallets || wallets.length === 0) {
+            throw new Error("No wallets provided in the request.");
         }
 
+        const loadedWallets = [];
+        for (const wallet of wallets) {
+            try {
+                const keypair = Keypair.fromSecretKey(bs58Decoder.decode(wallet.privateKey));
+                loadedWallets.push({
+                    name: wallet.name,
+                    keypair,
+                    publicKey: keypair.publicKey.toBase58()
+                });
+            } catch (error) {
+                console.error(`Failed to decode private key for wallet "${wallet.name}":`, error);
+                throw new Error(`Invalid private key for wallet "${wallet.name}".`);
+            }
+        }
+
+        console.log(`[PumpService] Successfully loaded ${loadedWallets.length} wallets from API request`);
+
         // Filter for eligible wallets
-        let eligibleWallets = allChildWallets.filter(wallet => {
+        let eligibleWallets = loadedWallets.filter(wallet => {
             if (wallet.name === DEV_WALLET_NAME) return false;
             for (let i = 1; i <= MAX_BUYERS_IN_CREATE_BUNDLE; i++) { // Max 4 "First Bundled Wallets"
                 if (wallet.name === `${FIRST_BUNDLED_BASE_NAME} ${i}`) return false;
@@ -535,7 +553,8 @@ async function batchBuyService(
 async function devSellService(
     mintAddress,
     sellAmountPercentage, // e.g., "50%" or "100%"
-    slippageBps = 2500
+    slippageBps = 2500,
+    wallets // Required: Array of { name: string, privateKey: string } - API-provided wallets
 ) {
     const connection = getSolanaConnection();
     const result = {
@@ -547,10 +566,31 @@ async function devSellService(
     };
 
     try {
-        const allChildWallets = await loadChildWalletsFromFile(CHILD_WALLETS_FILE);
-        const devWallet = allChildWallets.find(w => w.name === DEV_WALLET_NAME);
+        // MONOCODE Fix: Use provided wallets from API request instead of loading from file
+        if (!wallets || wallets.length === 0) {
+            throw new Error("No wallets provided in the request.");
+        }
+
+        const loadedWallets = [];
+        for (const wallet of wallets) {
+            try {
+                const keypair = Keypair.fromSecretKey(bs58Decoder.decode(wallet.privateKey));
+                loadedWallets.push({
+                    name: wallet.name,
+                    keypair,
+                    publicKey: keypair.publicKey.toBase58()
+                });
+            } catch (error) {
+                console.error(`Failed to decode private key for wallet "${wallet.name}":`, error);
+                throw new Error(`Invalid private key for wallet "${wallet.name}".`);
+            }
+        }
+
+        console.log(`[PumpService] Successfully loaded ${loadedWallets.length} wallets from API request`);
+
+        const devWallet = loadedWallets.find(w => w.name === DEV_WALLET_NAME);
         if (!devWallet) {
-            throw new Error("DevWallet not found in childWallets.json.");
+            throw new Error("DevWallet not found in provided wallets array.");
         }
 
         console.log(`Attempting to sell ${sellAmountPercentage} of ${mintAddress} from DevWallet (${devWallet.publicKey}).`);
@@ -632,7 +672,8 @@ async function batchSellService(
     mintAddress,
     sellAmountPercentage, // e.g., "50%" or "100%"
     slippageBps = 2500,
-    targetWalletNames // Optional: array of specific child wallet names to use (must be eligible)
+    targetWalletNames, // Optional: array of specific child wallet names to use (must be eligible)
+    wallets // Required: Array of { name: string, privateKey: string } - API-provided wallets
 ) {
     const connection = getSolanaConnection();
     const overallResult = {
@@ -646,13 +687,30 @@ async function batchSellService(
     };
 
     try {
-        const allChildWallets = await loadChildWalletsFromFile(CHILD_WALLETS_FILE);
-        if (!allChildWallets || allChildWallets.length === 0) {
-            throw new Error("No child wallets found.");
+        // MONOCODE Fix: Use provided wallets from API request instead of loading from file
+        if (!wallets || wallets.length === 0) {
+            throw new Error("No wallets provided in the request.");
         }
 
+        const loadedWallets = [];
+        for (const wallet of wallets) {
+            try {
+                const keypair = Keypair.fromSecretKey(bs58Decoder.decode(wallet.privateKey));
+                loadedWallets.push({
+                    name: wallet.name,
+                    keypair,
+                    publicKey: keypair.publicKey.toBase58()
+                });
+            } catch (error) {
+                console.error(`Failed to decode private key for wallet "${wallet.name}":`, error);
+                throw new Error(`Invalid private key for wallet "${wallet.name}".`);
+            }
+        }
+
+        console.log(`[PumpService] Successfully loaded ${loadedWallets.length} wallets from API request`);
+
         // Filter for eligible wallets (exclude DevWallet by default)
-        let eligibleWallets = allChildWallets.filter(wallet => wallet.name !== DEV_WALLET_NAME);
+        let eligibleWallets = loadedWallets.filter(wallet => wallet.name !== DEV_WALLET_NAME);
 
         if (targetWalletNames && targetWalletNames.length > 0) {
             eligibleWallets = eligibleWallets.filter(ew => targetWalletNames.includes(ew.name));
