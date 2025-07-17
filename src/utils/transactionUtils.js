@@ -19,7 +19,7 @@ const RPC_CONFIGS = {
         useWebSocket: true, // Always use WebSocket to avoid polling
         description: 'Free public RPC with VERY strict rate limits - 100 req/10s total'
     },
-    
+
     // Premium providers (QuickNode, Helius, Alchemy) - relaxed settings
     PREMIUM: {
         name: 'Premium RPC Provider',
@@ -35,7 +35,7 @@ const RPC_CONFIGS = {
 // Detect RPC type based on URL
 function getRpcConfig() {
     const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-    
+
     if (rpcUrl.includes('api.mainnet-beta.solana.com')) {
         console.log(`[TransactionUtils] Using PUBLIC RPC configuration for: ${rpcUrl}`);
         return RPC_CONFIGS.PUBLIC;
@@ -58,9 +58,9 @@ async function rateLimitedRpcCall(rpcFunction, retries = 3) {
     while (concurrentRequests >= currentRpcConfig.maxConcurrentRequests) {
         await sleep(50); // Short wait for slot to open
     }
-    
+
     concurrentRequests++;
-    
+
     try {
         for (let i = 0; i < retries; i++) {
             try {
@@ -71,7 +71,7 @@ async function rateLimitedRpcCall(rpcFunction, retries = 3) {
                     await sleep(currentRpcConfig.rpcCallInterval - timeSinceLastCall);
                 }
                 lastRpcCall = Date.now();
-                
+
                 return await rpcFunction();
             } catch (error) {
                 if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
@@ -97,11 +97,11 @@ async function rateLimitedRpcCall(rpcFunction, retries = 3) {
  */
 async function getRecentBlockhash(connection, commitment = 'confirmed') {
     console.log(`[TransactionUtils] Fetching recent blockhash with commitment: ${commitment}`);
-    
+
     const result = await rateLimitedRpcCall(async () => {
         return await connection.getLatestBlockhash(commitment);
     });
-    
+
     console.log(`[TransactionUtils] Blockhash obtained: ${result.blockhash.slice(0, 8)}...`);
     return result;
 }
@@ -124,20 +124,20 @@ function sleep(ms) {
  */
 function addPriorityFeeInstructions(transaction, priorityFeeMicrolamports = 100000, computeUnitLimit = 200000) {
     console.log(`[TransactionUtils] Adding priority fee: ${priorityFeeMicrolamports} microlamports, CU limit: ${computeUnitLimit}`);
-    
+
     // Add compute unit limit instruction
     const computeUnitLimitInstruction = web3.ComputeBudgetProgram.setComputeUnitLimit({
         units: computeUnitLimit
     });
-    
+
     // Add compute unit price instruction (priority fee)
     const computeUnitPriceInstruction = web3.ComputeBudgetProgram.setComputeUnitPrice({
         microLamports: priorityFeeMicrolamports
     });
-    
+
     // Add instructions at the beginning of the transaction
     transaction.instructions.unshift(computeUnitPriceInstruction, computeUnitLimitInstruction);
-    
+
     return transaction;
 }
 
@@ -172,12 +172,12 @@ async function confirmTransactionAdvanced(connection, signature, blockhash, last
  */
 async function confirmWithWebSocket(connection, signature, blockhash, lastValidBlockHeight, commitment) {
     console.log(`[TransactionUtils] Using WebSocket confirmation strategy`);
-    
+
     return new Promise((resolve, reject) => {
         let subscriptionId = null;
         let timeoutId = null;
         let resolved = false;
-        
+
         const cleanup = () => {
             if (timeoutId) {
                 clearTimeout(timeoutId);
@@ -186,15 +186,15 @@ async function confirmWithWebSocket(connection, signature, blockhash, lastValidB
             if (subscriptionId) {
                 const subId = subscriptionId;
                 subscriptionId = null;
-                connection.removeSignatureListener(subId).catch(() => {});
+                connection.removeSignatureListener(subId).catch(() => { });
             }
         };
-        
+
         const handleResult = (result, isTimeout = false) => {
             if (resolved) return;
             resolved = true;
             cleanup();
-            
+
             if (isTimeout) {
                 reject(new Error(`WebSocket confirmation timed out after ${currentRpcConfig.confirmationTimeout}ms`));
             } else if (result.err) {
@@ -204,7 +204,7 @@ async function confirmWithWebSocket(connection, signature, blockhash, lastValidB
                 resolve({ value: result });
             }
         };
-        
+
         try {
             // Set up WebSocket listener
             subscriptionId = connection.onSignatureWithOptions(
@@ -215,37 +215,37 @@ async function confirmWithWebSocket(connection, signature, blockhash, lastValidB
                 },
                 { commitment: commitment }
             );
-            
+
             // Set timeout with fallback check
             timeoutId = setTimeout(async () => {
                 if (resolved) return;
-                
+
                 console.log(`[TransactionUtils] WebSocket timeout reached, doing final status check...`);
-                
+
                 try {
                     const statusResult = await rateLimitedRpcCall(async () => {
                         return await connection.getSignatureStatus(signature);
                     });
-                    
+
                     if (statusResult && statusResult.value) {
                         const status = statusResult.value;
-                        const isConfirmed = status.confirmationStatus === commitment || 
-                                           (commitment === 'confirmed' && status.confirmationStatus === 'finalized');
-                        
+                        const isConfirmed = status.confirmationStatus === commitment ||
+                            (commitment === 'confirmed' && status.confirmationStatus === 'finalized');
+
                         if (isConfirmed && !status.err) {
                             console.log(`[TransactionUtils] ✅ Confirmed by fallback status check!`);
                             handleResult(status);
                             return;
                         }
                     }
-                    
+
                     handleResult(null, true); // Timeout
                 } catch (error) {
                     console.warn(`[TransactionUtils] Final status check failed: ${error.message}`);
                     handleResult(null, true); // Timeout
                 }
             }, currentRpcConfig.confirmationTimeout);
-            
+
         } catch (error) {
             cleanup();
             reject(error);
@@ -258,7 +258,7 @@ async function confirmWithWebSocket(connection, signature, blockhash, lastValidB
  */
 async function confirmWithPolling(connection, signature, blockhash, lastValidBlockHeight, commitment) {
     console.log(`[TransactionUtils] Using polling confirmation strategy`);
-    
+
     try {
         const confirmation = await rateLimitedRpcCall(async () => {
             return await connection.confirmTransaction({
@@ -267,14 +267,14 @@ async function confirmWithPolling(connection, signature, blockhash, lastValidBlo
                 lastValidBlockHeight: lastValidBlockHeight
             }, commitment);
         });
-        
+
         if (confirmation.value.err) {
             throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
         }
-        
+
         console.log(`[TransactionUtils] ✅ Polling confirmation successful!`);
         return confirmation;
-        
+
     } catch (error) {
         console.error(`[TransactionUtils] ❌ Polling confirmation failed: ${error.message}`);
         throw error;
@@ -288,11 +288,11 @@ async function confirmWithPolling(connection, signature, blockhash, lastValidBlo
 async function checkTransactionStatus(connection, signature) {
     try {
         console.log(`[TransactionUtils] Checking existing transaction status for: ${signature.slice(0, 8)}...`);
-        
+
         const status = await rateLimitedRpcCall(async () => {
             return await connection.getSignatureStatus(signature);
         });
-        
+
         if (status && status.value) {
             const result = status.value;
             if (result.confirmationStatus === 'confirmed' || result.confirmationStatus === 'finalized') {
@@ -305,7 +305,7 @@ async function checkTransactionStatus(connection, signature) {
                 }
             }
         }
-        
+
         return { confirmed: false };
     } catch (error) {
         console.warn(`[TransactionUtils] Could not check transaction status: ${error.message}`);
@@ -323,7 +323,7 @@ function calculateTransactionFee(priorityFeeMicrolamports = 100000, computeUnitL
     const baseFee = 5000; // Base transaction fee in lamports
     const priorityFeeInLamports = Math.ceil((priorityFeeMicrolamports * computeUnitLimit) / 1000000);
     const totalFee = baseFee + priorityFeeInLamports;
-    
+
     console.log(`[TransactionUtils] Fee calculation: Base=${baseFee}, Priority=${priorityFeeInLamports}, Total=${totalFee} lamports`);
     return totalFee;
 }
@@ -337,7 +337,7 @@ const SOLANA_RENT_CONSTANTS = {
     ACCOUNT_STORAGE_OVERHEAD: 128, // bytes
     DEFAULT_LAMPORTS_PER_BYTE_YEAR: 3480, // lamports per byte per year
     DEFAULT_EXEMPTION_THRESHOLD: 2.0, // 2 years of rent for exemption
-    
+
     // Common account sizes for quick reference
     BASIC_ACCOUNT_SIZE: 0, // Basic SOL account (just overhead)
     TOKEN_ACCOUNT_SIZE: 165, // SPL Token account size
@@ -354,14 +354,14 @@ const SOLANA_RENT_CONSTANTS = {
 function calculateRentExemption(accountDataSize = 0) {
     const totalAccountSize = accountDataSize + SOLANA_RENT_CONSTANTS.ACCOUNT_STORAGE_OVERHEAD;
     const rentExemptionLamports = Math.ceil(
-        totalAccountSize * 
-        SOLANA_RENT_CONSTANTS.DEFAULT_LAMPORTS_PER_BYTE_YEAR * 
+        totalAccountSize *
+        SOLANA_RENT_CONSTANTS.DEFAULT_LAMPORTS_PER_BYTE_YEAR *
         SOLANA_RENT_CONSTANTS.DEFAULT_EXEMPTION_THRESHOLD
     );
-    
+
     console.log(`[TransactionUtils] Rent calculation: ${accountDataSize} data bytes + ${SOLANA_RENT_CONSTANTS.ACCOUNT_STORAGE_OVERHEAD} overhead = ${totalAccountSize} total bytes`);
     console.log(`[TransactionUtils] Rent exemption: ${rentExemptionLamports} lamports (${(rentExemptionLamports / web3.LAMPORTS_PER_SOL).toFixed(8)} SOL)`);
-    
+
     return rentExemptionLamports;
 }
 
@@ -379,14 +379,14 @@ function getRentExemptionForAccountType(accountType) {
         'mint': SOLANA_RENT_CONSTANTS.MINT_ACCOUNT_SIZE,
         'multisig': SOLANA_RENT_CONSTANTS.MULTISIG_ACCOUNT_SIZE
     };
-    
+
     if (!(accountType in accountSizes)) {
         throw new Error(`Unknown account type: ${accountType}. Supported types: ${Object.keys(accountSizes).join(', ')}`);
     }
-    
+
     const accountSize = accountSizes[accountType];
     const rentLamports = calculateRentExemption(accountSize);
-    
+
     console.log(`[TransactionUtils] ${accountType} account rent exemption: ${rentLamports} lamports (${(rentLamports / web3.LAMPORTS_PER_SOL).toFixed(8)} SOL)`);
     return rentLamports;
 }
@@ -408,14 +408,14 @@ function calculateTransactionCostWithRent(options = {}) {
         accountTypesToCreate = [],
         includeRentBuffer = true
     } = options;
-    
+
     // Calculate base transaction fee
     const transactionFee = calculateTransactionFee(priorityFeeMicrolamports, computeUnitLimit);
-    
+
     // Calculate rent requirements for new accounts
     let totalRentRequired = 0;
     const rentBreakdown = {};
-    
+
     for (const accountType of accountTypesToCreate) {
         try {
             const rentAmount = getRentExemptionForAccountType(accountType);
@@ -425,11 +425,11 @@ function calculateTransactionCostWithRent(options = {}) {
             console.warn(`[TransactionUtils] Could not calculate rent for account type ${accountType}: ${error.message}`);
         }
     }
-    
+
     // Add safety buffer if requested (10% of total rent)
     const rentBuffer = includeRentBuffer ? Math.ceil(totalRentRequired * 0.1) : 0;
     const totalCost = transactionFee + totalRentRequired + rentBuffer;
-    
+
     const result = {
         transactionFee,
         rentCost: totalRentRequired, // Explicit rent cost for easier access
@@ -443,13 +443,13 @@ function calculateTransactionCostWithRent(options = {}) {
             rentBufferSOL: rentBuffer / web3.LAMPORTS_PER_SOL
         }
     };
-    
+
     console.log(`[TransactionUtils] ✅ Total cost calculation:`);
     console.log(`[TransactionUtils]   Transaction fee: ${result.summary.transactionFeeSOL.toFixed(8)} SOL`);
     console.log(`[TransactionUtils]   Rent required: ${result.summary.totalRentRequiredSOL.toFixed(8)} SOL`);
     console.log(`[TransactionUtils]   Rent buffer: ${result.summary.rentBufferSOL.toFixed(8)} SOL`);
     console.log(`[TransactionUtils]   Total cost: ${result.totalCostSOL.toFixed(8)} SOL`);
-    
+
     return result;
 }
 
@@ -465,7 +465,7 @@ function validateBalanceForRentOperations(accountBalanceSOL, costCalculation, ad
     const totalRequired = costCalculation.totalCostSOL + additionalSOLSpend;
     const isValid = accountBalanceSOL >= totalRequired;
     const shortfall = isValid ? 0 : totalRequired - accountBalanceSOL;
-    
+
     const result = {
         isValid,
         accountBalance: accountBalanceSOL,
@@ -478,14 +478,14 @@ function validateBalanceForRentOperations(accountBalanceSOL, costCalculation, ad
             additionalSpend: additionalSOLSpend
         }
     };
-    
+
     if (isValid) {
         console.log(`[TransactionUtils] ✅ Balance validation passed: ${accountBalanceSOL} SOL >= ${totalRequired.toFixed(8)} SOL required`);
     } else {
         console.warn(`[TransactionUtils] ❌ Insufficient balance: ${accountBalanceSOL} SOL < ${totalRequired.toFixed(8)} SOL required (shortfall: ${shortfall.toFixed(8)} SOL)`);
         console.warn(`[TransactionUtils] Breakdown: TX fee ${result.breakdown.transactionFee.toFixed(8)} + Rent ${result.breakdown.rentRequirements.toFixed(8)} + Buffer ${result.breakdown.rentBuffer.toFixed(8)} + Additional ${result.breakdown.additionalSpend.toFixed(8)} SOL`);
     }
-    
+
     return result;
 }
 
@@ -527,12 +527,12 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
     while (retries < maxRetries) {
         try {
             console.log(`[TransactionUtils] Attempt ${retries + 1}/${maxRetries}: Preparing transaction...`);
-            
+
             // CRITICAL: Check if last transaction succeeded before retrying
             if (lastSignature) {
                 console.log(`[TransactionUtils] Checking if previous transaction already succeeded...`);
                 const statusCheck = await checkTransactionStatus(connection, lastSignature);
-                
+
                 if (statusCheck.confirmed) {
                     console.log(`[TransactionUtils] ✅ Previous transaction already confirmed! Returning: ${lastSignature}`);
                     return lastSignature;
@@ -540,12 +540,12 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
                     console.log(`[TransactionUtils] Previous transaction failed definitively, proceeding with new attempt`);
                 }
             }
-            
+
             // Get FRESH blockhash for each attempt - CRITICAL for avoiding expiry
             const latestBlockhash = await rateLimitedRpcCall(async () => {
                 return await connection.getLatestBlockhash(commitment);
             });
-            
+
             transaction.recentBlockhash = latestBlockhash.blockhash;
             transaction.feePayer = signers[0].publicKey;
 
@@ -553,11 +553,11 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
 
             // Sign transaction
             transaction.sign(...signers);
-            
+
             // Send transaction immediately
             const rawTransaction = transaction.serialize();
             console.log(`[TransactionUtils] Sending transaction (${rawTransaction.length} bytes)...`);
-            
+
             // Send with optimized settings for current RPC type
             lastSignature = await rateLimitedRpcCall(async () => {
                 return await connection.sendRawTransaction(rawTransaction, {
@@ -572,10 +572,10 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
 
             // ADVANCED confirmation using WebSocket with polling fallback
             await confirmTransactionAdvanced(
-                connection, 
-                lastSignature, 
-                latestBlockhash.blockhash, 
-                latestBlockhash.lastValidBlockHeight, 
+                connection,
+                lastSignature,
+                latestBlockhash.blockhash,
+                latestBlockhash.lastValidBlockHeight,
                 commitment
             );
 
@@ -585,10 +585,10 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
         } catch (error) {
             console.warn(`[TransactionUtils] ❌ Attempt ${retries + 1} failed: ${error.message}`);
             retries++;
-            
+
             // MONOCODE Compliance: Enhanced error handling for insufficient funds
             // Check for multiple variations of insufficient funds errors including custom program error 1
-            if (error.message.includes('insufficient funds') || 
+            if (error.message.includes('insufficient funds') ||
                 error.message.includes('Insufficient funds') ||
                 error.message.includes('insufficient lamports') ||
                 error.message.includes('custom program error: 0x1') ||
@@ -597,16 +597,16 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
                 console.error(`[TransactionUtils] Error details: ${error.message}`);
                 throw error;
             }
-            
+
             // For confirmation timeouts, check if transaction actually succeeded
             if (error.message.includes('timed out') || error.message.includes('block height exceeded')) {
                 console.warn(`[TransactionUtils] ⏰ Confirmation issue - will check transaction status`);
-                
+
                 if (lastSignature) {
                     console.log(`[TransactionUtils] Doing final check for signature: ${lastSignature.slice(0, 8)}...`);
                     // Give network a moment to propagate
                     await sleep(2000);
-                    
+
                     const finalCheck = await checkTransactionStatus(connection, lastSignature);
                     if (finalCheck.confirmed) {
                         console.log(`[TransactionUtils] ✅ Transaction actually succeeded! Returning: ${lastSignature}`);
@@ -614,7 +614,7 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
                     }
                 }
             }
-            
+
             if (retries >= maxRetries) {
                 console.error(`[TransactionUtils] 🚫 All retries exhausted after ${maxRetries} attempts`);
                 throw new Error(`Transaction failed after ${maxRetries} attempts: ${error.message}`);
@@ -631,12 +631,12 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
             } else {
                 backoffTime = 1500; // Standard delay for other errors
             }
-            
+
             console.log(`[TransactionUtils] ⏳ Retrying in ${backoffTime}ms...`);
             await sleep(backoffTime);
         }
     }
-    
+
     throw new Error('Transaction failed after all retries - this should not be reached');
 }
 
@@ -649,15 +649,15 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
  */
 function createSolTransferTransaction(fromPubkey, toPubkey, lamports) {
     console.log(`[TransactionUtils] Creating SOL transfer: ${lamports} lamports from ${fromPubkey.toBase58().slice(0, 8)}... to ${toPubkey.toBase58().slice(0, 8)}...`);
-    
+
     const transaction = new web3.Transaction();
-    
+
     const transferInstruction = web3.SystemProgram.transfer({
         fromPubkey: fromPubkey,
         toPubkey: toPubkey,
         lamports: lamports
     });
-    
+
     transaction.add(transferInstruction);
     return transaction;
 }
@@ -690,19 +690,19 @@ function lamportsToSol(lamports) {
 async function estimateTransactionFee(connection, transaction, signers) {
     try {
         console.log(`[TransactionUtils] Estimating transaction fee...`);
-        
+
         // Get recent blockhash
         const { blockhash } = await getRecentBlockhash(connection);
         transaction.recentBlockhash = blockhash;
         transaction.feePayer = signers[0].publicKey;
-        
+
         // Get fee for transaction with rate limiting
         const fee = await rateLimitedRpcCall(async () => {
             return await connection.getFeeForMessage(transaction.compileMessage());
         });
-        
+
         const estimatedFee = fee.value || 5000; // Default fallback fee
-        
+
         console.log(`[TransactionUtils] Estimated fee: ${estimatedFee} lamports (${lamportsToSol(estimatedFee)} SOL)`);
         return estimatedFee;
     } catch (error) {
@@ -720,7 +720,7 @@ async function estimateTransactionFee(connection, transaction, signers) {
 async function getDynamicPriorityFee(connection, accounts = []) {
     try {
         console.log(`[TransactionUtils] Getting dynamic priority fee...`);
-        
+
         // Try to get recent prioritization fees with rate limiting protection
         if (connection.getRecentPrioritizationFees) {
             const recentFees = await rateLimitedRpcCall(async () => {
@@ -728,21 +728,21 @@ async function getDynamicPriorityFee(connection, accounts = []) {
                     lockedWritableAccounts: accounts.slice(0, 5)
                 });
             });
-            
+
             if (recentFees && recentFees.length > 0) {
                 // Use 90th percentile for higher success rate
                 const sortedFees = recentFees
                     .map(fee => fee.prioritizationFee)
                     .sort((a, b) => a - b);
-                
+
                 const percentile90Index = Math.floor(sortedFees.length * 0.9);
                 const recommendedFee = Math.max(sortedFees[percentile90Index] || 100000, 50000);
-                
+
                 console.log(`[TransactionUtils] Dynamic priority fee (90th percentile): ${recommendedFee} microlamports`);
                 return recommendedFee;
             }
         }
-        
+
         console.log(`[TransactionUtils] Using fallback priority fee: 100000 microlamports`);
         return 100000;
     } catch (error) {
@@ -769,7 +769,7 @@ function addPriorityFeeInstructionsVersioned(transaction, priorityFeeMicrolampor
         console.log(`[TransactionUtils] VersionedTransaction detected - priority fees handled internally by Jupiter`);
         return transaction; // Return as-is, Jupiter handles priority fees internally
     }
-    
+
     console.warn(`[TransactionUtils] addPriorityFeeInstructionsVersioned called with non-VersionedTransaction - use addPriorityFeeInstructions instead`);
     return transaction;
 }
@@ -788,7 +788,7 @@ async function sendAndConfirmVersionedTransaction(connection, transaction, optio
     const { commitment = 'confirmed' } = options;
 
     console.log(`[TransactionUtils] Sending pre-signed VersionedTransaction...`);
-    
+
     const rawTransaction = transaction.serialize();
     const signature = await rateLimitedRpcCall(async () => {
         return await connection.sendRawTransaction(rawTransaction, {
@@ -803,10 +803,10 @@ async function sendAndConfirmVersionedTransaction(connection, transaction, optio
     const latestBlockhash = await getRecentBlockhash(connection, commitment);
 
     await confirmTransactionAdvanced(
-        connection, 
-        signature, 
+        connection,
+        signature,
         latestBlockhash.blockhash,
-        latestBlockhash.lastValidBlockHeight, 
+        latestBlockhash.lastValidBlockHeight,
         commitment
     );
 
@@ -855,11 +855,16 @@ const INITIAL_RETRY_DELAY_JITO_SEND = 2000;
 const MAX_RETRY_DELAY_JITO_SEND = 30000;
 const BUNDLE_STATUS_POLL_INTERVAL = 2000;
 const BUNDLE_STATUS_POLL_ATTEMPTS = 10; // Default, can be overridden
-const JITO_REGIONAL_ENDPOINT = 'https://mainnet.block-engine.jito.wtf/api/v1/bundles'; // Default, can be overridden
+const JITO_REGIONAL_ENDPOINT = 'https://mainnet.block-engine.jito.wtf/api/v1/bundles'; // mainnet endpoint for better performance
+
+// Global rate limiter for Jito bundle sends to prevent burst requests
+const JITO_SEND_INTERVAL_MS = 1000; // 1 second minimum between bundle sends
+let lastJitoBundleSend = 0;
 
 /**
  * Sends a bundle of transactions to the Jito Block Engine with retries.
  * Enhanced with optional RPC config integration and improved error context.
+ * Includes global rate limiting to prevent burst requests that cause 429 errors.
  * @param {string[]} encodedSignedTxs_base58 - Array of base58 encoded signed transactions.
  * @param {object} [jitoOptions] - Options for Jito interaction.
  * @param {string} [jitoOptions.jitoEndpoint] - Jito regional endpoint.
@@ -872,11 +877,21 @@ const JITO_REGIONAL_ENDPOINT = 'https://mainnet.block-engine.jito.wtf/api/v1/bun
 async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = {}) {
     const endpoint = jitoOptions.jitoEndpoint || JITO_REGIONAL_ENDPOINT;
     const maxRetries = jitoOptions.maxRetries || MAX_RETRIES_JITO_SEND;
-    
+
+    // CRITICAL: Global rate limiting to prevent burst requests
+    const now = Date.now();
+    const timeSinceLastSend = now - lastJitoBundleSend;
+    if (timeSinceLastSend < JITO_SEND_INTERVAL_MS) {
+        const waitTime = JITO_SEND_INTERVAL_MS - timeSinceLastSend;
+        console.log(`[TransactionUtils] 🚦 Rate limiting Jito bundle send: waiting ${waitTime}ms to prevent burst requests`);
+        await sleep(waitTime);
+    }
+    lastJitoBundleSend = Date.now();
+
     // Optional RPC config integration for adaptive timing
     let currentDelay = jitoOptions.initialDelay || INITIAL_RETRY_DELAY_JITO_SEND;
     const maxDelay = jitoOptions.maxDelay || MAX_RETRY_DELAY_JITO_SEND;
-    
+
     if (jitoOptions.useRpcConfig && currentRpcConfig) {
         console.log(`[TransactionUtils] Using RPC config adaptive timing for Jito bundle`);
         currentDelay = Math.max(currentDelay, currentRpcConfig.retryBackoff / 2); // Conservative adaptation
@@ -913,7 +928,7 @@ async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = 
             if (response.status === 429) { // Rate limited
                 const retryAfterHeader = response.headers.get('Retry-After');
                 const waitTime = retryAfterHeader ? parseInt(retryAfterHeader) * 1000 : currentDelay;
-                console.warn(`[TransactionUtils] Rate limited by Jito sendBundle. Waiting ${waitTime/1000} seconds...`);
+                console.warn(`[TransactionUtils] Rate limited by Jito sendBundle. Waiting ${waitTime / 1000} seconds...`);
                 await sleep(waitTime);
                 currentDelay = Math.min(currentDelay * 2, maxDelay);
             } else {
@@ -947,14 +962,14 @@ async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = 
 async function confirmBundleWebSocketOnly(connection, firstSignature, options = {}) {
     const { commitment = 'confirmed', timeoutMs = null } = options;
     const startTime = Date.now();
-    
+
     console.log(`[TransactionUtils] 🔌 Starting WebSocket-ONLY bundle confirmation for: ${firstSignature.slice(0, 8)}...`);
     console.log(`[TransactionUtils] This approach avoids Jito rate limiting by using Solana WebSocket notifications`);
-    
+
     try {
         // Use the existing WebSocket confirmation function
         await waitForBundleViaWebSocket(connection, firstSignature, commitment, timeoutMs);
-        
+
         const confirmationTime = Date.now() - startTime;
         const result = {
             confirmed: true,
@@ -963,27 +978,27 @@ async function confirmBundleWebSocketOnly(connection, firstSignature, options = 
             confirmationTimeMs: confirmationTime,
             timestamp: Date.now()
         };
-        
+
         console.log(`[TransactionUtils] ✅ Bundle confirmed via WebSocket in ${confirmationTime}ms`);
         return result;
-        
+
     } catch (error) {
         const confirmationTime = Date.now() - startTime;
-        
+
         // Check if this was a timeout that might have actually succeeded
         if (error.message.includes('timed out') || error.message.includes('timeout')) {
             console.log(`[TransactionUtils] ⏰ WebSocket timeout after ${confirmationTime}ms, checking final status via Solana RPC...`);
-            
+
             try {
                 const statusResult = await rateLimitedRpcCall(async () => {
                     return await connection.getSignatureStatus(firstSignature);
                 });
-                
+
                 if (statusResult && statusResult.value) {
                     const status = statusResult.value;
-                    const isConfirmed = status.confirmationStatus === commitment || 
-                                       (commitment === 'confirmed' && status.confirmationStatus === 'finalized');
-                    
+                    const isConfirmed = status.confirmationStatus === commitment ||
+                        (commitment === 'confirmed' && status.confirmationStatus === 'finalized');
+
                     if (isConfirmed && !status.err) {
                         console.log(`[TransactionUtils] ✅ Bundle actually confirmed! Found via Solana RPC fallback`);
                         return {
@@ -999,7 +1014,7 @@ async function confirmBundleWebSocketOnly(connection, firstSignature, options = 
                 console.warn(`[TransactionUtils] Solana RPC fallback check failed: ${fallbackError.message}`);
             }
         }
-        
+
         console.error(`[TransactionUtils] ❌ Bundle confirmation failed: ${error.message}`);
         throw new Error(`Bundle confirmation failed after ${confirmationTime}ms: ${error.message}`);
     }
@@ -1018,12 +1033,12 @@ async function confirmBundleWebSocketOnly(connection, firstSignature, options = 
 async function waitForBundleViaWebSocket(connection, firstSignature, commitment = 'confirmed', timeoutMs = null) {
     const timeout = timeoutMs || currentRpcConfig.confirmationTimeout;
     console.log(`[TransactionUtils] Waiting for bundle confirmation via WebSocket on signature: ${firstSignature.slice(0, 8)}...`);
-    
+
     return new Promise((resolve, reject) => {
         let subscriptionId = null;
         let timeoutId = null;
         let resolved = false;
-        
+
         const cleanup = () => {
             if (timeoutId) {
                 clearTimeout(timeoutId);
@@ -1032,15 +1047,15 @@ async function waitForBundleViaWebSocket(connection, firstSignature, commitment 
             if (subscriptionId) {
                 const subId = subscriptionId;
                 subscriptionId = null;
-                connection.removeSignatureListener(subId).catch(() => {});
+                connection.removeSignatureListener(subId).catch(() => { });
             }
         };
-        
+
         const handleResult = (result, isTimeout = false) => {
             if (resolved) return;
             resolved = true;
             cleanup();
-            
+
             if (isTimeout) {
                 reject(new Error(`Bundle WebSocket confirmation timed out after ${timeout}ms`));
             } else if (result.err) {
@@ -1050,7 +1065,7 @@ async function waitForBundleViaWebSocket(connection, firstSignature, commitment 
                 resolve();
             }
         };
-        
+
         try {
             // Set up WebSocket listener for the first transaction signature
             subscriptionId = connection.onSignatureWithOptions(
@@ -1061,37 +1076,37 @@ async function waitForBundleViaWebSocket(connection, firstSignature, commitment 
                 },
                 { commitment: commitment }
             );
-            
+
             // Set timeout with fallback RPC check
             timeoutId = setTimeout(async () => {
                 if (resolved) return;
-                
+
                 console.log(`[TransactionUtils] Bundle WebSocket timeout reached, doing final RPC check...`);
-                
+
                 try {
                     const statusResult = await rateLimitedRpcCall(async () => {
                         return await connection.getSignatureStatus(firstSignature);
                     });
-                    
+
                     if (statusResult && statusResult.value) {
                         const status = statusResult.value;
-                        const isConfirmed = status.confirmationStatus === commitment || 
-                                           (commitment === 'confirmed' && status.confirmationStatus === 'finalized');
-                        
+                        const isConfirmed = status.confirmationStatus === commitment ||
+                            (commitment === 'confirmed' && status.confirmationStatus === 'finalized');
+
                         if (isConfirmed && !status.err) {
                             console.log(`[TransactionUtils] ✅ Bundle confirmed by fallback RPC check!`);
                             handleResult(status);
                             return;
                         }
                     }
-                    
+
                     handleResult(null, true); // Timeout
                 } catch (error) {
                     console.warn(`[TransactionUtils] Bundle fallback RPC check failed: ${error.message}`);
                     handleResult(null, true); // Timeout
                 }
             }, timeout);
-            
+
         } catch (error) {
             cleanup();
             reject(error);
@@ -1115,7 +1130,7 @@ async function pollBundleStatus(bundleId, jitoOptions = {}) {
     console.error(`[TransactionUtils] ❌ pollBundleStatus is DEPRECATED and disabled to prevent Jito rate limiting`);
     console.error(`[TransactionUtils] Use waitForBundleViaWebSocket(connection, firstSignature) instead`);
     console.error(`[TransactionUtils] WebSocket confirmation avoids rate limits and is more reliable`);
-    
+
     throw new Error(
         'pollBundleStatus is deprecated to prevent Jito rate limiting. ' +
         'Use waitForBundleViaWebSocket(connection, firstSignature) for bundle confirmation. ' +
@@ -1140,24 +1155,24 @@ module.exports = {
     rateLimitedRpcCall,
     getRpcConfig: () => currentRpcConfig,
     RPC_CONFIGS,
-    
+
     // MONOCODE Compliance: New rent calculation utilities
     calculateRentExemption,
     getRentExemptionForAccountType,
     calculateTransactionCostWithRent,
     validateBalanceForRentOperations,
     SOLANA_RENT_CONSTANTS,
-    
+
     // Jupiter-specific functions
     addPriorityFeeInstructionsVersioned,
     sendAndConfirmVersionedTransaction,
-    
+
     // Jito functions - WebSocket-only approach to avoid rate limiting
     sendJitoBundleWithRetries,
     confirmBundleWebSocketOnly, // NEW: Recommended WebSocket-only bundle confirmation
     waitForBundleViaWebSocket, // Existing WebSocket-based bundle confirmation
     // REMOVED: pollBundleStatus - deprecated to prevent rate limiting
-    
+
     // Make constants available for configuration if needed by services
     MAX_RETRIES_JITO_SEND,
     INITIAL_RETRY_DELAY_JITO_SEND,
