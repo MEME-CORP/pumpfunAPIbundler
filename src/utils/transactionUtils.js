@@ -815,8 +815,39 @@ async function sendAndConfirmVersionedTransaction(connection, transaction, optio
 }
 
 // ============================================================================
-// JITO-SPECIFIC FUNCTIONS (PRESERVED FROM ORIGINAL)
+// JITO-SPECIFIC FUNCTIONS - WEBSOCKET-ONLY APPROACH
 // ============================================================================
+
+/**
+ * IMPORTANT: JITO RATE LIMITING PREVENTION
+ * 
+ * This module uses a WebSocket-only approach for Jito bundle confirmation to prevent
+ * rate limiting issues that cause transaction failures. Key principles:
+ * 
+ * 1. SEND bundles to Jito using sendJitoBundleWithRetries()
+ * 2. CONFIRM bundles using confirmBundleWebSocketOnly() or waitForBundleViaWebSocket()
+ * 3. NEVER poll Jito endpoints for status (causes 429 rate limiting)
+ * 4. Use Solana WebSocket notifications for confirmation
+ * 5. Fallback to Solana RPC (not Jito) if WebSocket fails
+ * 
+ * USAGE EXAMPLE:
+ * ```javascript
+ * // 1. Send bundle to Jito
+ * const bundleId = await sendJitoBundleWithRetries(encodedTxs);
+ * 
+ * // 2. Confirm via WebSocket (recommended)
+ * const result = await confirmBundleWebSocketOnly(connection, firstSignature);
+ * 
+ * // Alternative: Direct WebSocket confirmation
+ * await waitForBundleViaWebSocket(connection, firstSignature);
+ * ```
+ * 
+ * TROUBLESHOOTING:
+ * - If you get 429 errors, ensure you're not using pollBundleStatus()
+ * - Use confirmBundleWebSocketOnly() for the best experience
+ * - WebSocket confirmation is faster and more reliable than polling
+ * - Bundle atomicity means confirming the first transaction confirms the entire bundle
+ */
 
 // Constants for Jito interactions (can be made configurable)
 const MAX_RETRIES_JITO_SEND = 7;
@@ -900,6 +931,78 @@ async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = 
         retryCount++;
     }
     throw new Error(`Failed to send Jito bundle to ${endpoint} after ${maxRetries} attempts.`);
+}
+
+/**
+ * Confirms a Jito bundle using ONLY WebSocket-based confirmation to avoid rate limiting.
+ * This is the recommended approach for bundle confirmation as it eliminates Jito polling.
+ * 
+ * @param {web3.Connection} connection - Solana connection object
+ * @param {string} firstSignature - The first transaction signature in the bundle
+ * @param {object} [options] - Configuration options
+ * @param {web3.Commitment} [options.commitment='confirmed'] - Commitment level
+ * @param {number} [options.timeoutMs] - Timeout in milliseconds (defaults to RPC config)
+ * @returns {Promise<object>} Bundle confirmation result with metadata
+ */
+async function confirmBundleWebSocketOnly(connection, firstSignature, options = {}) {
+    const { commitment = 'confirmed', timeoutMs = null } = options;
+    const startTime = Date.now();
+    
+    console.log(`[TransactionUtils] 🔌 Starting WebSocket-ONLY bundle confirmation for: ${firstSignature.slice(0, 8)}...`);
+    console.log(`[TransactionUtils] This approach avoids Jito rate limiting by using Solana WebSocket notifications`);
+    
+    try {
+        // Use the existing WebSocket confirmation function
+        await waitForBundleViaWebSocket(connection, firstSignature, commitment, timeoutMs);
+        
+        const confirmationTime = Date.now() - startTime;
+        const result = {
+            confirmed: true,
+            signature: firstSignature,
+            method: 'websocket',
+            confirmationTimeMs: confirmationTime,
+            timestamp: Date.now()
+        };
+        
+        console.log(`[TransactionUtils] ✅ Bundle confirmed via WebSocket in ${confirmationTime}ms`);
+        return result;
+        
+    } catch (error) {
+        const confirmationTime = Date.now() - startTime;
+        
+        // Check if this was a timeout that might have actually succeeded
+        if (error.message.includes('timed out') || error.message.includes('timeout')) {
+            console.log(`[TransactionUtils] ⏰ WebSocket timeout after ${confirmationTime}ms, checking final status via Solana RPC...`);
+            
+            try {
+                const statusResult = await rateLimitedRpcCall(async () => {
+                    return await connection.getSignatureStatus(firstSignature);
+                });
+                
+                if (statusResult && statusResult.value) {
+                    const status = statusResult.value;
+                    const isConfirmed = status.confirmationStatus === commitment || 
+                                       (commitment === 'confirmed' && status.confirmationStatus === 'finalized');
+                    
+                    if (isConfirmed && !status.err) {
+                        console.log(`[TransactionUtils] ✅ Bundle actually confirmed! Found via Solana RPC fallback`);
+                        return {
+                            confirmed: true,
+                            signature: firstSignature,
+                            method: 'rpc_fallback',
+                            confirmationTimeMs: confirmationTime,
+                            timestamp: Date.now()
+                        };
+                    }
+                }
+            } catch (fallbackError) {
+                console.warn(`[TransactionUtils] Solana RPC fallback check failed: ${fallbackError.message}`);
+            }
+        }
+        
+        console.error(`[TransactionUtils] ❌ Bundle confirmation failed: ${error.message}`);
+        throw new Error(`Bundle confirmation failed after ${confirmationTime}ms: ${error.message}`);
+    }
 }
 
 /**
@@ -997,77 +1100,27 @@ async function waitForBundleViaWebSocket(connection, firstSignature, commitment 
 }
 
 /**
- * Polls Jito for the status of a bundle.
- * Enhanced with improved error context and adaptive timing.
- * @param {string} bundleId - The ID of the bundle to poll.
- * @param {object} [jitoOptions] - Options for Jito interaction.
- * @param {string} [jitoOptions.jitoEndpoint] - Jito regional endpoint.
- * @param {number} [jitoOptions.pollAttempts] - Number of polling attempts.
- * @param {number} [jitoOptions.pollInterval] - Interval between polls in ms.
- * @param {boolean} [jitoOptions.useRpcConfig] - Use RPC config for adaptive timing.
- * @returns {Promise<'landed' | 'failed_or_dropped' | 'indeterminate'>} The status of the bundle.
+ * DEPRECATED: This function has been removed to prevent Jito rate limiting.
+ * Use waitForBundleViaWebSocket() instead for bundle confirmation.
+ * 
+ * Jito polling causes rate limiting (429 errors) which prevents reliable bundle execution.
+ * The WebSocket approach confirms bundles through Solana RPC without additional Jito calls.
+ * 
+ * @deprecated Use waitForBundleViaWebSocket() for bundle confirmation
+ * @param {string} bundleId - The ID of the bundle (ignored)
+ * @param {object} [jitoOptions] - Options (ignored)
+ * @throws {Error} Always throws deprecation error
  */
 async function pollBundleStatus(bundleId, jitoOptions = {}) {
-    const endpoint = jitoOptions.jitoEndpoint || JITO_REGIONAL_ENDPOINT;
-    const pollAttempts = jitoOptions.pollAttempts || BUNDLE_STATUS_POLL_ATTEMPTS;
-    let pollInterval = jitoOptions.pollInterval || BUNDLE_STATUS_POLL_INTERVAL;
+    console.error(`[TransactionUtils] ❌ pollBundleStatus is DEPRECATED and disabled to prevent Jito rate limiting`);
+    console.error(`[TransactionUtils] Use waitForBundleViaWebSocket(connection, firstSignature) instead`);
+    console.error(`[TransactionUtils] WebSocket confirmation avoids rate limits and is more reliable`);
     
-    // Optional RPC config integration for adaptive polling
-    if (jitoOptions.useRpcConfig && currentRpcConfig) {
-        console.log(`[TransactionUtils] Using RPC config adaptive timing for bundle polling`);
-        pollInterval = Math.max(pollInterval, currentRpcConfig.rpcCallInterval * 2); // Conservative adaptation
-    }
-
-    console.log(`[TransactionUtils] Polling Jito for bundle status of ${bundleId} (up to ${pollAttempts} attempts, interval ${pollInterval}ms) at ${endpoint}...`);
-    for (let attempts = 0; attempts < pollAttempts; attempts++) {
-        await sleep(pollInterval);
-        if (attempts === 0 || (attempts + 1) % 5 === 0 || attempts === pollAttempts -1 ) {
-             console.log(`[TransactionUtils] Polling attempt ${attempts + 1}/${pollAttempts} for bundle ${bundleId}...`);
-        }
-        try {
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBundleStatuses', params: [[bundleId]] })
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                if (data.error) {
-                    console.warn(`[TransactionUtils] Jito getBundleStatuses RPC error for ${bundleId}: ${data.error.message}`);
-                    continue; // Try next attempt
-                }
-                if (data.result && data.result.value && data.result.value.length > 0) {
-                    const statusInfo = data.result.value[0];
-                    console.log(`[TransactionUtils] Bundle ${bundleId} Jito confirmation_status: ${statusInfo.confirmation_status}, Error: ${JSON.stringify(statusInfo.err)}`);
-                    
-                    // Check for explicit error in the bundle transaction itself, even if Jito processed it
-                    if (statusInfo.err && (typeof statusInfo.err === 'string' && statusInfo.err.toLowerCase() !== 'ok' && statusInfo.err !== null) || 
-                        (typeof statusInfo.err === 'object' && statusInfo.err !== null && !statusInfo.err.hasOwnProperty('Ok'))) {
-                        console.error(`[TransactionUtils] Bundle ${bundleId} processed by Jito but with an error state:`, statusInfo.err);
-                        return 'failed_or_dropped';
-                    }
-
-                    // Check confirmation status
-                    const confirmationStatus = statusInfo.confirmation_status ? statusInfo.confirmation_status.toLowerCase() : null;
-                    if (confirmationStatus === 'processed' || confirmationStatus === 'confirmed' || confirmationStatus === 'finalized') {
-                        console.log(`[TransactionUtils] ✅ Bundle ${bundleId} landed successfully!`);
-                        return 'landed';
-                    } else if (confirmationStatus === 'failed' || confirmationStatus === 'dropped') {
-                        console.error(`[TransactionUtils] Bundle ${bundleId} explicitly failed or was dropped by Jito. Error:`, statusInfo.err);
-                        return 'failed_or_dropped';
-                    }
-                }
-            } else {
-                const errorText = await response.text();
-                console.warn(`[TransactionUtils] Jito getBundleStatuses HTTP error for ${bundleId} (attempt ${attempts + 1}): ${response.status} ${errorText}`);
-            }
-        } catch (error) {
-            console.warn(`[TransactionUtils] Error polling Jito bundle status for ${bundleId} (attempt ${attempts + 1}): ${error.message}`);
-        }
-    }
-    console.warn(`[TransactionUtils] ⏰ Bundle ${bundleId} status indeterminate after ${pollAttempts} attempts (${pollAttempts * pollInterval / 1000}s total)`);
-    return 'indeterminate';
+    throw new Error(
+        'pollBundleStatus is deprecated to prevent Jito rate limiting. ' +
+        'Use waitForBundleViaWebSocket(connection, firstSignature) for bundle confirmation. ' +
+        'This approach uses Solana WebSocket notifications instead of polling Jito endpoints.'
+    );
 }
 
 module.exports = {
@@ -1098,15 +1151,18 @@ module.exports = {
     // Jupiter-specific functions
     addPriorityFeeInstructionsVersioned,
     sendAndConfirmVersionedTransaction,
-    // Jito functions (preserved)
+    
+    // Jito functions - WebSocket-only approach to avoid rate limiting
     sendJitoBundleWithRetries,
-    pollBundleStatus,
-    waitForBundleViaWebSocket, // MONOCODE Fix: WebSocket-based bundle confirmation
+    confirmBundleWebSocketOnly, // NEW: Recommended WebSocket-only bundle confirmation
+    waitForBundleViaWebSocket, // Existing WebSocket-based bundle confirmation
+    // REMOVED: pollBundleStatus - deprecated to prevent rate limiting
+    
     // Make constants available for configuration if needed by services
     MAX_RETRIES_JITO_SEND,
     INITIAL_RETRY_DELAY_JITO_SEND,
     MAX_RETRY_DELAY_JITO_SEND,
-    BUNDLE_STATUS_POLL_INTERVAL,
-    BUNDLE_STATUS_POLL_ATTEMPTS,
+    BUNDLE_STATUS_POLL_INTERVAL, // Kept for legacy compatibility but not used
+    BUNDLE_STATUS_POLL_ATTEMPTS, // Kept for legacy compatibility but not used
     JITO_REGIONAL_ENDPOINT
 }; 
