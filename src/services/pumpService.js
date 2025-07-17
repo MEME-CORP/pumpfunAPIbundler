@@ -553,7 +553,7 @@ async function batchBuyService(
 async function devSellService(
     mintAddress,
     sellAmountPercentage, // e.g., "50%" or "100%"
-    slippageBps = 2500,
+    slippageBps = 5000,
     wallets // Required: Array of { name: string, privateKey: string } - API-provided wallets
 ) {
     const connection = getSolanaConnection();
