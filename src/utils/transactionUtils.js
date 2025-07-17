@@ -855,7 +855,7 @@ const INITIAL_RETRY_DELAY_JITO_SEND = 2000;
 const MAX_RETRY_DELAY_JITO_SEND = 30000;
 const BUNDLE_STATUS_POLL_INTERVAL = 2000;
 const BUNDLE_STATUS_POLL_ATTEMPTS = 10; // Default, can be overridden
-const JITO_REGIONAL_ENDPOINT = 'https://mainnet.block-engine.jito.wtf/api/v1/bundles'; // mainnet endpoint for better performance
+const JITO_REGIONAL_ENDPOINT = 'https://ny.mainnet.block-engine.jito.wtf/api/v1/bundles'; // NY regional endpoint for better performance
 
 // Global rate limiter for Jito bundle sends to prevent burst requests
 const JITO_SEND_INTERVAL_MS = 1000; // 1 second minimum between bundle sends
