@@ -20,7 +20,7 @@ const {
     DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE,
     DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL
 } = require('../utils/pumpAndJitoUtils');
-const { sendJitoBundleWithRetries, pollBundleStatus, waitForBundleViaWebSocket, sleep, getRecentBlockhash } = require('../utils/transactionUtils');
+const { sendJitoBundleWithRetries, pollBundleStatus, waitForBundleViaWebSocket, sleep, getRecentBlockhash, simulateTransactionWithDiagnostics } = require('../utils/transactionUtils');
 
 // MONOCODE Compliance: Fix bs58 decoder compatibility issue
 const bs58Decoder = bs58.default || bs58;
@@ -336,6 +336,33 @@ async function createAndBuyService(
             });
         });
 
+        // DEBUGGING: Preflight simulation with diagnostics (can be disabled via env var)
+        const enablePreflightDiagnostics = process.env.ENABLE_PREFLIGHT_DIAGNOSTICS !== 'false';
+        if (enablePreflightDiagnostics) {
+            console.log(`[PumpService] 🔍 Running preflight diagnostics for ${signedEncodedTransactions.length} transactions...`);
+            
+            for (let i = 0; i < signedEncodedTransactions.length; i++) {
+                const transactionBuffer = Buffer.from(signedEncodedTransactions[i], 'base64');
+                const transaction = web3.Transaction.from(transactionBuffer);
+                const walletName = walletSignerMap[i].wallet.name;
+                const action = bundledTxArgs[i].action;
+                
+                const simulationResult = await simulateTransactionWithDiagnostics(
+                    connection,
+                    transaction,
+                    `CreateAndBuy - Wallet: ${walletName}, Action: ${action}`,
+                    { enableDiagnostics: true, commitment: 'confirmed' }
+                );
+                
+                if (!simulationResult.success) {
+                    console.error(`[PumpService] ❌ Preflight FAILED for ${walletName} (${action}):`, simulationResult.diagnostics.recommendations);
+                    // Continue with bundle submission even if simulation fails (for debugging purposes)
+                } else {
+                    console.log(`[PumpService] ✅ Preflight PASSED for ${walletName} (${action}) - Units: ${simulationResult.simulationResult.unitsConsumed}`);
+                }
+            }
+        }
+
         // 7. Send Jito Bundle
         console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle...`);
         const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
@@ -503,6 +530,32 @@ async function batchBuyService(
                     });
                 });
 
+                // DEBUGGING: Preflight simulation with diagnostics (can be disabled via env var)
+                const enablePreflightDiagnostics = process.env.ENABLE_PREFLIGHT_DIAGNOSTICS !== 'false';
+                if (enablePreflightDiagnostics) {
+                    console.log(`[PumpService] 🔍 Running preflight diagnostics for batch ${i + 1} (${signedEncodedTransactions.length} transactions)...`);
+                    
+                    for (let txIdx = 0; txIdx < signedEncodedTransactions.length; txIdx++) {
+                        const transactionBuffer = Buffer.from(signedEncodedTransactions[txIdx], 'base64');
+                        const transaction = web3.Transaction.from(transactionBuffer);
+                        const walletName = walletSignerMap[txIdx].wallet.name;
+                        
+                        const simulationResult = await simulateTransactionWithDiagnostics(
+                            connection,
+                            transaction,
+                            `BatchBuy Batch ${i + 1} - Wallet: ${walletName}, Action: buy`,
+                            { enableDiagnostics: true, commitment: 'confirmed' }
+                        );
+                        
+                        if (!simulationResult.success) {
+                            console.error(`[PumpService] ❌ Preflight FAILED for batch ${i + 1}, ${walletName}:`, simulationResult.diagnostics.recommendations);
+                            // Continue with bundle submission even if simulation fails (for debugging purposes)
+                        } else {
+                            console.log(`[PumpService] ✅ Preflight PASSED for batch ${i + 1}, ${walletName} - Units: ${simulationResult.simulationResult.unitsConsumed}`);
+                        }
+                    }
+                }
+
                 console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle for batch ${i + 1}...`);
                 const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
                 batchBundleResult.bundleId = bundleId;
@@ -639,6 +692,29 @@ async function devSellService(
             rawTx: rawTransactionsFromApi[0],
             signedTx: signedEncodedTransactions[0]
         });
+
+        // DEBUGGING: Preflight simulation with diagnostics (can be disabled via env var)
+        const enablePreflightDiagnostics = process.env.ENABLE_PREFLIGHT_DIAGNOSTICS !== 'false';
+        if (enablePreflightDiagnostics) {
+            console.log(`[PumpService] 🔍 Running preflight diagnostics for DevWallet sell...`);
+            
+            const transactionBuffer = Buffer.from(signedEncodedTransactions[0], 'base64');
+            const transaction = web3.Transaction.from(transactionBuffer);
+            
+            const simulationResult = await simulateTransactionWithDiagnostics(
+                connection,
+                transaction,
+                `DevSell - Wallet: ${devWallet.name}, Action: sell`,
+                { enableDiagnostics: true, commitment: 'confirmed' }
+            );
+            
+            if (!simulationResult.success) {
+                console.error(`[PumpService] ❌ Preflight FAILED for DevWallet sell:`, simulationResult.diagnostics.recommendations);
+                // Continue with bundle submission even if simulation fails (for debugging purposes)
+            } else {
+                console.log(`[PumpService] ✅ Preflight PASSED for DevWallet sell - Units: ${simulationResult.simulationResult.unitsConsumed}`);
+            }
+        }
 
         console.log(`Sending 1-TX Jito bundle for DevWallet sell...`);
         const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
@@ -797,6 +873,32 @@ async function batchSellService(
                         signedTx: signedEncodedTransactions[idx]
                     });
                 });
+
+                // DEBUGGING: Preflight simulation with diagnostics (can be disabled via env var)
+                const enablePreflightDiagnostics = process.env.ENABLE_PREFLIGHT_DIAGNOSTICS !== 'false';
+                if (enablePreflightDiagnostics) {
+                    console.log(`[PumpService] 🔍 Running preflight diagnostics for batch ${i + 1} (${signedEncodedTransactions.length} transactions)...`);
+                    
+                    for (let txIdx = 0; txIdx < signedEncodedTransactions.length; txIdx++) {
+                        const transactionBuffer = Buffer.from(signedEncodedTransactions[txIdx], 'base64');
+                        const transaction = web3.Transaction.from(transactionBuffer);
+                        const walletName = walletSignerMap[txIdx].wallet.name;
+                        
+                        const simulationResult = await simulateTransactionWithDiagnostics(
+                            connection,
+                            transaction,
+                            `BatchSell Batch ${i + 1} - Wallet: ${walletName}, Action: sell`,
+                            { enableDiagnostics: true, commitment: 'confirmed' }
+                        );
+                        
+                        if (!simulationResult.success) {
+                            console.error(`[PumpService] ❌ Preflight FAILED for batch ${i + 1}, ${walletName}:`, simulationResult.diagnostics.recommendations);
+                            // Continue with bundle submission even if simulation fails (for debugging purposes)
+                        } else {
+                            console.log(`[PumpService] ✅ Preflight PASSED for batch ${i + 1}, ${walletName} - Units: ${simulationResult.simulationResult.unitsConsumed}`);
+                        }
+                    }
+                }
 
                 console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle for batch ${i + 1}...`);
                 const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);

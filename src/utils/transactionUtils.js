@@ -116,6 +116,208 @@ function sleep(ms) {
 }
 
 /**
+ * Comprehensive transaction simulation with extensive diagnostic logging
+ * MONOCODE Compliance: Observable implementation with structured logging for debugging
+ * @param {web3.Connection} connection - Solana connection object
+ * @param {web3.Transaction} transaction - Transaction to simulate
+ * @param {string} transactionContext - Context description for logging (e.g., "Wallet: DevWallet, Action: sell")
+ * @param {object} [options] - Simulation options
+ * @param {boolean} [options.enableDiagnostics=true] - Enable detailed diagnostic logging
+ * @param {web3.Commitment} [options.commitment='confirmed'] - Commitment level for simulation
+ * @returns {Promise<{success: boolean, simulationResult: object, diagnostics: object}>}
+ */
+async function simulateTransactionWithDiagnostics(connection, transaction, transactionContext, options = {}) {
+    const { enableDiagnostics = true, commitment = 'confirmed' } = options;
+    const startTime = Date.now();
+    
+    if (enableDiagnostics) {
+        console.log(`[TransactionDiagnostics] 🔍 Starting simulation for: ${transactionContext}`);
+        console.log(`[TransactionDiagnostics] Transaction details:`, {
+            feePayer: transaction.feePayer?.toBase58(),
+            recentBlockhash: transaction.recentBlockhash,
+            instructionCount: transaction.instructions.length,
+            signatures: transaction.signatures.length
+        });
+    }
+
+    const diagnostics = {
+        context: transactionContext,
+        startTime,
+        preSimulationChecks: {},
+        simulationResult: null,
+        postSimulationAnalysis: {},
+        recommendations: []
+    };
+
+    try {
+        // Pre-simulation diagnostics
+        if (enableDiagnostics) {
+            console.log(`[TransactionDiagnostics] 📊 Pre-simulation checks for: ${transactionContext}`);
+            
+            // Check fee payer balance
+            if (transaction.feePayer) {
+                try {
+                    const feePayerBalance = await rateLimitedRpcCall(async () => {
+                        return await connection.getBalance(transaction.feePayer, commitment);
+                    });
+                    diagnostics.preSimulationChecks.feePayerBalance = {
+                        lamports: feePayerBalance,
+                        sol: feePayerBalance / web3.LAMPORTS_PER_SOL
+                    };
+                    console.log(`[TransactionDiagnostics] Fee payer balance: ${feePayerBalance} lamports (${(feePayerBalance / web3.LAMPORTS_PER_SOL).toFixed(8)} SOL)`);
+                } catch (error) {
+                    console.warn(`[TransactionDiagnostics] Could not check fee payer balance: ${error.message}`);
+                    diagnostics.preSimulationChecks.feePayerBalanceError = error.message;
+                }
+            }
+
+            // Check blockhash validity
+            if (transaction.recentBlockhash) {
+                try {
+                    const blockheightInfo = await rateLimitedRpcCall(async () => {
+                        return await connection.getLatestBlockhash(commitment);
+                    });
+                    diagnostics.preSimulationChecks.blockhashInfo = {
+                        current: blockheightInfo.blockhash,
+                        transaction: transaction.recentBlockhash,
+                        isMatch: blockheightInfo.blockhash === transaction.recentBlockhash,
+                        currentBlockHeight: blockheightInfo.lastValidBlockHeight
+                    };
+                    console.log(`[TransactionDiagnostics] Blockhash check:`, {
+                        transactionBlockhash: transaction.recentBlockhash.slice(0, 8) + '...',
+                        currentBlockhash: blockheightInfo.blockhash.slice(0, 8) + '...',
+                        isMatch: blockheightInfo.blockhash === transaction.recentBlockhash
+                    });
+                } catch (error) {
+                    console.warn(`[TransactionDiagnostics] Could not check blockhash: ${error.message}`);
+                    diagnostics.preSimulationChecks.blockhashError = error.message;
+                }
+            }
+
+            // Analyze instructions
+            console.log(`[TransactionDiagnostics] Instruction analysis:`);
+            transaction.instructions.forEach((instruction, index) => {
+                console.log(`[TransactionDiagnostics] Instruction ${index + 1}:`, {
+                    programId: instruction.programId.toBase58(),
+                    accountsCount: instruction.keys.length,
+                    dataLength: instruction.data.length
+                });
+            });
+        }
+
+        // Perform simulation
+        console.log(`[TransactionDiagnostics] 🚀 Executing simulation for: ${transactionContext}`);
+        const simulationResult = await rateLimitedRpcCall(async () => {
+            return await connection.simulateTransaction(transaction, {
+                commitment: commitment,
+                sigVerify: false, // Skip signature verification for speed
+                replaceRecentBlockhash: true, // Use latest blockhash for simulation
+                accounts: {
+                    encoding: 'base64',
+                    addresses: transaction.instructions.flatMap(ix => 
+                        ix.keys.map(key => key.pubkey.toBase58())
+                    ).slice(0, 5) // Limit to first 5 accounts to avoid too much data
+                }
+            });
+        });
+
+        diagnostics.simulationResult = simulationResult;
+        const simulationTime = Date.now() - startTime;
+
+        if (enableDiagnostics) {
+            console.log(`[TransactionDiagnostics] ✅ Simulation completed in ${simulationTime}ms for: ${transactionContext}`);
+            console.log(`[TransactionDiagnostics] Simulation result:`, {
+                success: !simulationResult.value.err,
+                error: simulationResult.value.err,
+                logs: simulationResult.value.logs?.slice(0, 10), // First 10 logs only
+                unitsConsumed: simulationResult.value.unitsConsumed,
+                returnData: simulationResult.value.returnData
+            });
+        }
+
+        // Post-simulation analysis
+        if (simulationResult.value.err) {
+            console.error(`[TransactionDiagnostics] ❌ Simulation FAILED for: ${transactionContext}`);
+            console.error(`[TransactionDiagnostics] Error details:`, simulationResult.value.err);
+            
+            // Analyze common error patterns
+            const errorString = JSON.stringify(simulationResult.value.err);
+            if (errorString.includes('insufficient funds') || errorString.includes('InsufficientFunds')) {
+                diagnostics.recommendations.push('INSUFFICIENT_FUNDS: Check account balances and ensure sufficient SOL for transaction fees');
+                console.error(`[TransactionDiagnostics] 💰 INSUFFICIENT FUNDS detected - check balances`);
+            }
+            if (errorString.includes('InvalidAccountData') || errorString.includes('AccountNotFound')) {
+                diagnostics.recommendations.push('ACCOUNT_ISSUE: Verify account exists and has correct data structure');
+                console.error(`[TransactionDiagnostics] 🏦 ACCOUNT ISSUE detected - verify account state`);
+            }
+            if (errorString.includes('custom program error')) {
+                diagnostics.recommendations.push('PROGRAM_ERROR: Custom program error - check program-specific requirements');
+                console.error(`[TransactionDiagnostics] 🔧 PROGRAM ERROR detected - check program requirements`);
+            }
+            if (errorString.includes('BlockhashNotFound') || errorString.includes('blockhash')) {
+                diagnostics.recommendations.push('BLOCKHASH_ISSUE: Transaction blockhash may be expired or invalid');
+                console.error(`[TransactionDiagnostics] ⏰ BLOCKHASH ISSUE detected - may be expired`);
+            }
+
+            diagnostics.postSimulationAnalysis.errorAnalysis = {
+                errorType: simulationResult.value.err,
+                errorString: errorString,
+                commonPatterns: diagnostics.recommendations
+            };
+
+            return {
+                success: false,
+                simulationResult: simulationResult.value,
+                diagnostics
+            };
+        }
+
+        // Success analysis
+        if (enableDiagnostics) {
+            console.log(`[TransactionDiagnostics] ✅ Simulation SUCCESS for: ${transactionContext}`);
+            console.log(`[TransactionDiagnostics] Units consumed: ${simulationResult.value.unitsConsumed}`);
+            
+            if (simulationResult.value.logs && simulationResult.value.logs.length > 0) {
+                console.log(`[TransactionDiagnostics] Program logs (first 5):`);
+                simulationResult.value.logs.slice(0, 5).forEach((log, index) => {
+                    console.log(`[TransactionDiagnostics] Log ${index + 1}: ${log}`);
+                });
+            }
+        }
+
+        diagnostics.postSimulationAnalysis.successAnalysis = {
+            unitsConsumed: simulationResult.value.unitsConsumed,
+            logCount: simulationResult.value.logs?.length || 0,
+            simulationTimeMs: simulationTime
+        };
+
+        return {
+            success: true,
+            simulationResult: simulationResult.value,
+            diagnostics
+        };
+
+    } catch (error) {
+        const simulationTime = Date.now() - startTime;
+        console.error(`[TransactionDiagnostics] ❌ Simulation ERROR for: ${transactionContext} after ${simulationTime}ms`);
+        console.error(`[TransactionDiagnostics] Error details:`, error.message);
+
+        diagnostics.postSimulationAnalysis.simulationError = {
+            message: error.message,
+            stack: error.stack,
+            simulationTimeMs: simulationTime
+        };
+
+        return {
+            success: false,
+            simulationResult: null,
+            diagnostics,
+            error: error.message
+        };
+    }
+}
+
+/**
  * Adds priority fee instructions to a transaction.
  * @param {web3.Transaction} transaction - The transaction to add priority fees to.
  * @param {number} [priorityFeeMicrolamports=100000] - Priority fee in microlamports.
@@ -1172,6 +1374,9 @@ module.exports = {
     confirmBundleWebSocketOnly, // NEW: Recommended WebSocket-only bundle confirmation
     waitForBundleViaWebSocket, // Existing WebSocket-based bundle confirmation
     // REMOVED: pollBundleStatus - deprecated to prevent rate limiting
+    
+    // Debugging and diagnostics functions
+    simulateTransactionWithDiagnostics, // NEW: Comprehensive transaction simulation with diagnostics
 
     // Make constants available for configuration if needed by services
     MAX_RETRIES_JITO_SEND,
