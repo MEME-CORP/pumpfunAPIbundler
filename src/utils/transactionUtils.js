@@ -116,123 +116,6 @@ function sleep(ms) {
 }
 
 /**
- * Pre-signing transaction analysis and simulation
- * This approach analyzes raw transaction data before signing to avoid buffer deserialization issues
- * MONOCODE Compliance: Observable implementation with structured logging
- * @param {web3.Connection} connection - Solana connection object
- * @param {string} rawTransactionBase64 - Raw transaction from Pump Portal (base64)
- * @param {string} transactionContext - Context for logging
- * @param {object} walletInfo - Wallet information { name, publicKey }
- * @param {object} [options] - Simulation options
- * @returns {Promise<{success: boolean, analysis: object, recommendations: string[]}>}
- */
-async function analyzeRawTransaction(connection, rawTransactionBase64, transactionContext, walletInfo, options = {}) {
-    const { enableDiagnostics = true } = options;
-    const startTime = Date.now();
-    
-    const analysis = {
-        context: transactionContext,
-        wallet: walletInfo,
-        startTime,
-        rawTransactionSize: rawTransactionBase64.length,
-        recommendations: []
-    };
-
-    try {
-        if (enableDiagnostics) {
-            console.log(`[PreSigningAnalysis] 🔍 Analyzing raw transaction for: ${transactionContext}`);
-            console.log(`[PreSigningAnalysis] Wallet: ${walletInfo.name} (${walletInfo.publicKey.slice(0, 8)}...)`);
-            console.log(`[PreSigningAnalysis] Raw transaction size: ${rawTransactionBase64.length} characters`);
-        }
-
-        // Basic transaction validation
-        if (!rawTransactionBase64 || rawTransactionBase64.length === 0) {
-            analysis.recommendations.push('EMPTY_TRANSACTION: Raw transaction is empty or invalid');
-            return { success: false, analysis, recommendations: analysis.recommendations };
-        }
-
-        // Check wallet balance
-        try {
-            const balance = await rateLimitedRpcCall(async () => {
-                return await connection.getBalance(new web3.PublicKey(walletInfo.publicKey));
-            });
-            
-            analysis.walletBalance = {
-                lamports: balance,
-                sol: balance / web3.LAMPORTS_PER_SOL
-            };
-
-            if (enableDiagnostics) {
-                console.log(`[PreSigningAnalysis] Wallet balance: ${balance} lamports (${(balance / web3.LAMPORTS_PER_SOL).toFixed(8)} SOL)`);
-            }
-
-            // Basic balance checks
-            if (balance < 5000) { // Minimum for transaction fees
-                analysis.recommendations.push('LOW_BALANCE: Wallet balance may be insufficient for transaction fees');
-            }
-
-        } catch (error) {
-            console.warn(`[PreSigningAnalysis] Could not check wallet balance: ${error.message}`);
-            analysis.balanceCheckError = error.message;
-        }
-
-        // Check current network conditions
-        try {
-            const { blockhash, lastValidBlockHeight } = await rateLimitedRpcCall(async () => {
-                return await connection.getLatestBlockhash('confirmed');
-            });
-            
-            analysis.networkConditions = {
-                currentBlockhash: blockhash,
-                lastValidBlockHeight,
-                timestamp: Date.now()
-            };
-
-            if (enableDiagnostics) {
-                console.log(`[PreSigningAnalysis] Network conditions: Block height ${lastValidBlockHeight}, Blockhash: ${blockhash.slice(0, 8)}...`);
-            }
-
-        } catch (error) {
-            console.warn(`[PreSigningAnalysis] Could not check network conditions: ${error.message}`);
-            analysis.networkError = error.message;
-        }
-
-        const analysisTime = Date.now() - startTime;
-        analysis.analysisTimeMs = analysisTime;
-
-        if (enableDiagnostics) {
-            console.log(`[PreSigningAnalysis] ✅ Analysis completed in ${analysisTime}ms for: ${transactionContext}`);
-            if (analysis.recommendations.length > 0) {
-                console.log(`[PreSigningAnalysis] Recommendations:`, analysis.recommendations);
-            }
-        }
-
-        return {
-            success: true,
-            analysis,
-            recommendations: analysis.recommendations
-        };
-
-    } catch (error) {
-        const analysisTime = Date.now() - startTime;
-        console.error(`[PreSigningAnalysis] ❌ Analysis failed for: ${transactionContext} after ${analysisTime}ms`);
-        console.error(`[PreSigningAnalysis] Error: ${error.message}`);
-
-        analysis.analysisError = {
-            message: error.message,
-            stack: error.stack,
-            analysisTimeMs: analysisTime
-        };
-
-        return {
-            success: false,
-            analysis,
-            recommendations: ['ANALYSIS_ERROR: Pre-signing analysis failed - ' + error.message]
-        };
-    }
-}
-
-/**
  * Adds priority fee instructions to a transaction.
  * @param {web3.Transaction} transaction - The transaction to add priority fees to.
  * @param {number} [priorityFeeMicrolamports=100000] - Priority fee in microlamports.
@@ -624,7 +507,7 @@ function validateBalanceForRentOperations(accountBalanceSOL, costCalculation, ad
  */
 async function sendAndConfirmTransactionRobustly(connection, transaction, signers, options = {}) {
     const {
-        skipPreflight = false,
+        skipPreflight = true,
         maxRetries = 3,
         commitment = 'confirmed',
         priorityFeeMicrolamports = 100000,
@@ -980,7 +863,7 @@ let lastJitoBundleSend = 0;
 
 /**
  * Sends a bundle of transactions to the Jito Block Engine with retries.
- * Enhanced with blockhash refresh capability and improved error context.
+ * Enhanced with optional RPC config integration and improved error context.
  * Includes global rate limiting to prevent burst requests that cause 429 errors.
  * @param {string[]} encodedSignedTxs_base58 - Array of base58 encoded signed transactions.
  * @param {object} [jitoOptions] - Options for Jito interaction.
@@ -989,7 +872,6 @@ let lastJitoBundleSend = 0;
  * @param {number} [jitoOptions.initialDelay] - Initial retry delay.
  * @param {number} [jitoOptions.maxDelay] - Max retry delay.
  * @param {boolean} [jitoOptions.useRpcConfig] - Use RPC config for adaptive timing.
- * @param {Function} [jitoOptions.onBlockhashExpired] - Callback when blockhash expires (should return new signed transactions)
  * @returns {Promise<string>} The bundle ID.
  */
 async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = {}) {
@@ -1049,26 +931,6 @@ async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = 
                 console.warn(`[TransactionUtils] Rate limited by Jito sendBundle. Waiting ${waitTime / 1000} seconds...`);
                 await sleep(waitTime);
                 currentDelay = Math.min(currentDelay * 2, maxDelay);
-            } else if (response.status === 400 && errorText.includes('expired blockhash')) {
-                console.warn(`[TransactionUtils] Blockhash expired during Jito retries. Attempting refresh...`);
-                if (jitoOptions.onBlockhashExpired && typeof jitoOptions.onBlockhashExpired === 'function') {
-                    try {
-                        console.log(`[TransactionUtils] Calling blockhash refresh callback...`);
-                        const newSignedTxs = await jitoOptions.onBlockhashExpired();
-                        if (newSignedTxs && newSignedTxs.length === encodedSignedTxs_base58.length) {
-                            console.log(`[TransactionUtils] ✅ Blockhash refreshed, using new signed transactions`);
-                            encodedSignedTxs_base58 = newSignedTxs; // Use refreshed transactions
-                            currentDelay = jitoOptions.initialDelay || INITIAL_RETRY_DELAY_JITO_SEND; // Reset delay
-                        } else {
-                            throw new Error('Blockhash refresh callback returned invalid transactions');
-                        }
-                    } catch (refreshError) {
-                        console.error(`[TransactionUtils] Blockhash refresh failed: ${refreshError.message}`);
-                        throw new Error(`Blockhash expired and refresh failed: ${refreshError.message}`);
-                    }
-                } else {
-                    throw new Error(`Blockhash expired and no refresh callback provided. Response: ${errorText}`);
-                }
             } else {
                 throw new Error(`Failed to send Jito bundle: HTTP ${response.status}. Response: ${errorText}`);
             }
@@ -1310,9 +1172,6 @@ module.exports = {
     confirmBundleWebSocketOnly, // NEW: Recommended WebSocket-only bundle confirmation
     waitForBundleViaWebSocket, // Existing WebSocket-based bundle confirmation
     // REMOVED: pollBundleStatus - deprecated to prevent rate limiting
-    
-    // Debugging and diagnostics functions
-    analyzeRawTransaction, // NEW: Pre-signing transaction analysis
 
     // Make constants available for configuration if needed by services
     MAX_RETRIES_JITO_SEND,
