@@ -15,7 +15,7 @@ const RPC_CONFIGS = {
         rpcCallInterval: 1000, // 1000ms between calls (conservative for 100 req/10s = max 10 req/s)
         maxConcurrentRequests: 2, // Very low concurrent requests (limit is 40)
         retryBackoff: 15000, // 15s backoff for 429 errors (much longer)
-        confirmationTimeout: 60000, // 60s confirmation timeout (longer for rate-limited environment)
+        confirmationTimeout: 25000, // 25s confirmation timeout (longer for rate-limited environment)
         useWebSocket: true, // Always use WebSocket to avoid polling
         description: 'Free public RPC with VERY strict rate limits - 100 req/10s total'
     },
@@ -26,7 +26,7 @@ const RPC_CONFIGS = {
         rpcCallInterval: 100, // 100ms between calls (higher limits)
         maxConcurrentRequests: 10, // More concurrent requests allowed
         retryBackoff: 1000, // 1s backoff
-        confirmationTimeout: 30000, // 30s confirmation timeout
+        confirmationTimeout: 10000, // 10s confirmation timeout
         useWebSocket: true, // WebSocket preferred but polling fallback available
         description: 'Premium RPC with higher rate limits and better performance'
     }
@@ -850,7 +850,7 @@ async function sendAndConfirmVersionedTransaction(connection, transaction, optio
  */
 
 // Constants for Jito interactions (can be made configurable)
-const MAX_RETRIES_JITO_SEND = 7;
+const MAX_RETRIES_JITO_SEND = 3;
 const INITIAL_RETRY_DELAY_JITO_SEND = 2000;
 const MAX_RETRY_DELAY_JITO_SEND = 30000;
 const BUNDLE_STATUS_POLL_INTERVAL = 2000;

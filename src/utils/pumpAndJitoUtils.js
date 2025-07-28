@@ -12,7 +12,8 @@ const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = `${PUMP_PORTAL_API_URL}/trade-local`;
 // MONOCODE Fix: Removed PUMP_PORTAL_IPFS_ENDPOINT - now using Pinata for IPFS uploads
 
 // Default Jito tip for pump.fun transactions (can be overridden by specific services)
-const DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE = 0.0021; // As determined successful
+// check dashboard to provide a tip on the 95th percentile here: https://jito-labs.metabaseapp.com/public/dashboard/016d4d60-e168-4a8f-93c7-4cd5ec6c7c8d
+const DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE = 0.0039; // As determined successful
 const DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL = 0.00005; // Follow documentation pattern: small fee for subsequent TXs
 
 const bs58Decoder = bs58.default || bs58;
