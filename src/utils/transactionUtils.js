@@ -116,203 +116,118 @@ function sleep(ms) {
 }
 
 /**
- * Comprehensive transaction simulation with extensive diagnostic logging
- * MONOCODE Compliance: Observable implementation with structured logging for debugging
+ * Pre-signing transaction analysis and simulation
+ * This approach analyzes raw transaction data before signing to avoid buffer deserialization issues
+ * MONOCODE Compliance: Observable implementation with structured logging
  * @param {web3.Connection} connection - Solana connection object
- * @param {web3.Transaction} transaction - Transaction to simulate
- * @param {string} transactionContext - Context description for logging (e.g., "Wallet: DevWallet, Action: sell")
+ * @param {string} rawTransactionBase64 - Raw transaction from Pump Portal (base64)
+ * @param {string} transactionContext - Context for logging
+ * @param {object} walletInfo - Wallet information { name, publicKey }
  * @param {object} [options] - Simulation options
- * @param {boolean} [options.enableDiagnostics=true] - Enable detailed diagnostic logging
- * @param {web3.Commitment} [options.commitment='confirmed'] - Commitment level for simulation
- * @returns {Promise<{success: boolean, simulationResult: object, diagnostics: object}>}
+ * @returns {Promise<{success: boolean, analysis: object, recommendations: string[]}>}
  */
-async function simulateTransactionWithDiagnostics(connection, transaction, transactionContext, options = {}) {
-    const { enableDiagnostics = true, commitment = 'confirmed' } = options;
+async function analyzeRawTransaction(connection, rawTransactionBase64, transactionContext, walletInfo, options = {}) {
+    const { enableDiagnostics = true } = options;
     const startTime = Date.now();
     
-    if (enableDiagnostics) {
-        console.log(`[TransactionDiagnostics] 🔍 Starting simulation for: ${transactionContext}`);
-        console.log(`[TransactionDiagnostics] Transaction details:`, {
-            feePayer: transaction.feePayer?.toBase58(),
-            recentBlockhash: transaction.recentBlockhash,
-            instructionCount: transaction.instructions.length,
-            signatures: transaction.signatures.length
-        });
-    }
-
-    const diagnostics = {
+    const analysis = {
         context: transactionContext,
+        wallet: walletInfo,
         startTime,
-        preSimulationChecks: {},
-        simulationResult: null,
-        postSimulationAnalysis: {},
+        rawTransactionSize: rawTransactionBase64.length,
         recommendations: []
     };
 
     try {
-        // Pre-simulation diagnostics
         if (enableDiagnostics) {
-            console.log(`[TransactionDiagnostics] 📊 Pre-simulation checks for: ${transactionContext}`);
-            
-            // Check fee payer balance
-            if (transaction.feePayer) {
-                try {
-                    const feePayerBalance = await rateLimitedRpcCall(async () => {
-                        return await connection.getBalance(transaction.feePayer, commitment);
-                    });
-                    diagnostics.preSimulationChecks.feePayerBalance = {
-                        lamports: feePayerBalance,
-                        sol: feePayerBalance / web3.LAMPORTS_PER_SOL
-                    };
-                    console.log(`[TransactionDiagnostics] Fee payer balance: ${feePayerBalance} lamports (${(feePayerBalance / web3.LAMPORTS_PER_SOL).toFixed(8)} SOL)`);
-                } catch (error) {
-                    console.warn(`[TransactionDiagnostics] Could not check fee payer balance: ${error.message}`);
-                    diagnostics.preSimulationChecks.feePayerBalanceError = error.message;
-                }
-            }
-
-            // Check blockhash validity
-            if (transaction.recentBlockhash) {
-                try {
-                    const blockheightInfo = await rateLimitedRpcCall(async () => {
-                        return await connection.getLatestBlockhash(commitment);
-                    });
-                    diagnostics.preSimulationChecks.blockhashInfo = {
-                        current: blockheightInfo.blockhash,
-                        transaction: transaction.recentBlockhash,
-                        isMatch: blockheightInfo.blockhash === transaction.recentBlockhash,
-                        currentBlockHeight: blockheightInfo.lastValidBlockHeight
-                    };
-                    console.log(`[TransactionDiagnostics] Blockhash check:`, {
-                        transactionBlockhash: transaction.recentBlockhash.slice(0, 8) + '...',
-                        currentBlockhash: blockheightInfo.blockhash.slice(0, 8) + '...',
-                        isMatch: blockheightInfo.blockhash === transaction.recentBlockhash
-                    });
-                } catch (error) {
-                    console.warn(`[TransactionDiagnostics] Could not check blockhash: ${error.message}`);
-                    diagnostics.preSimulationChecks.blockhashError = error.message;
-                }
-            }
-
-            // Analyze instructions
-            console.log(`[TransactionDiagnostics] Instruction analysis:`);
-            transaction.instructions.forEach((instruction, index) => {
-                console.log(`[TransactionDiagnostics] Instruction ${index + 1}:`, {
-                    programId: instruction.programId.toBase58(),
-                    accountsCount: instruction.keys.length,
-                    dataLength: instruction.data.length
-                });
-            });
+            console.log(`[PreSigningAnalysis] 🔍 Analyzing raw transaction for: ${transactionContext}`);
+            console.log(`[PreSigningAnalysis] Wallet: ${walletInfo.name} (${walletInfo.publicKey.slice(0, 8)}...)`);
+            console.log(`[PreSigningAnalysis] Raw transaction size: ${rawTransactionBase64.length} characters`);
         }
 
-        // Perform simulation
-        console.log(`[TransactionDiagnostics] 🚀 Executing simulation for: ${transactionContext}`);
-        const simulationResult = await rateLimitedRpcCall(async () => {
-            return await connection.simulateTransaction(transaction, {
-                commitment: commitment,
-                sigVerify: false, // Skip signature verification for speed
-                replaceRecentBlockhash: true, // Use latest blockhash for simulation
-                accounts: {
-                    encoding: 'base64',
-                    addresses: transaction.instructions.flatMap(ix => 
-                        ix.keys.map(key => key.pubkey.toBase58())
-                    ).slice(0, 5) // Limit to first 5 accounts to avoid too much data
-                }
-            });
-        });
-
-        diagnostics.simulationResult = simulationResult;
-        const simulationTime = Date.now() - startTime;
-
-        if (enableDiagnostics) {
-            console.log(`[TransactionDiagnostics] ✅ Simulation completed in ${simulationTime}ms for: ${transactionContext}`);
-            console.log(`[TransactionDiagnostics] Simulation result:`, {
-                success: !simulationResult.value.err,
-                error: simulationResult.value.err,
-                logs: simulationResult.value.logs?.slice(0, 10), // First 10 logs only
-                unitsConsumed: simulationResult.value.unitsConsumed,
-                returnData: simulationResult.value.returnData
-            });
+        // Basic transaction validation
+        if (!rawTransactionBase64 || rawTransactionBase64.length === 0) {
+            analysis.recommendations.push('EMPTY_TRANSACTION: Raw transaction is empty or invalid');
+            return { success: false, analysis, recommendations: analysis.recommendations };
         }
 
-        // Post-simulation analysis
-        if (simulationResult.value.err) {
-            console.error(`[TransactionDiagnostics] ❌ Simulation FAILED for: ${transactionContext}`);
-            console.error(`[TransactionDiagnostics] Error details:`, simulationResult.value.err);
+        // Check wallet balance
+        try {
+            const balance = await rateLimitedRpcCall(async () => {
+                return await connection.getBalance(new web3.PublicKey(walletInfo.publicKey));
+            });
             
-            // Analyze common error patterns
-            const errorString = JSON.stringify(simulationResult.value.err);
-            if (errorString.includes('insufficient funds') || errorString.includes('InsufficientFunds')) {
-                diagnostics.recommendations.push('INSUFFICIENT_FUNDS: Check account balances and ensure sufficient SOL for transaction fees');
-                console.error(`[TransactionDiagnostics] 💰 INSUFFICIENT FUNDS detected - check balances`);
-            }
-            if (errorString.includes('InvalidAccountData') || errorString.includes('AccountNotFound')) {
-                diagnostics.recommendations.push('ACCOUNT_ISSUE: Verify account exists and has correct data structure');
-                console.error(`[TransactionDiagnostics] 🏦 ACCOUNT ISSUE detected - verify account state`);
-            }
-            if (errorString.includes('custom program error')) {
-                diagnostics.recommendations.push('PROGRAM_ERROR: Custom program error - check program-specific requirements');
-                console.error(`[TransactionDiagnostics] 🔧 PROGRAM ERROR detected - check program requirements`);
-            }
-            if (errorString.includes('BlockhashNotFound') || errorString.includes('blockhash')) {
-                diagnostics.recommendations.push('BLOCKHASH_ISSUE: Transaction blockhash may be expired or invalid');
-                console.error(`[TransactionDiagnostics] ⏰ BLOCKHASH ISSUE detected - may be expired`);
-            }
-
-            diagnostics.postSimulationAnalysis.errorAnalysis = {
-                errorType: simulationResult.value.err,
-                errorString: errorString,
-                commonPatterns: diagnostics.recommendations
+            analysis.walletBalance = {
+                lamports: balance,
+                sol: balance / web3.LAMPORTS_PER_SOL
             };
 
-            return {
-                success: false,
-                simulationResult: simulationResult.value,
-                diagnostics
-            };
+            if (enableDiagnostics) {
+                console.log(`[PreSigningAnalysis] Wallet balance: ${balance} lamports (${(balance / web3.LAMPORTS_PER_SOL).toFixed(8)} SOL)`);
+            }
+
+            // Basic balance checks
+            if (balance < 5000) { // Minimum for transaction fees
+                analysis.recommendations.push('LOW_BALANCE: Wallet balance may be insufficient for transaction fees');
+            }
+
+        } catch (error) {
+            console.warn(`[PreSigningAnalysis] Could not check wallet balance: ${error.message}`);
+            analysis.balanceCheckError = error.message;
         }
 
-        // Success analysis
-        if (enableDiagnostics) {
-            console.log(`[TransactionDiagnostics] ✅ Simulation SUCCESS for: ${transactionContext}`);
-            console.log(`[TransactionDiagnostics] Units consumed: ${simulationResult.value.unitsConsumed}`);
+        // Check current network conditions
+        try {
+            const { blockhash, lastValidBlockHeight } = await rateLimitedRpcCall(async () => {
+                return await connection.getLatestBlockhash('confirmed');
+            });
             
-            if (simulationResult.value.logs && simulationResult.value.logs.length > 0) {
-                console.log(`[TransactionDiagnostics] Program logs (first 5):`);
-                simulationResult.value.logs.slice(0, 5).forEach((log, index) => {
-                    console.log(`[TransactionDiagnostics] Log ${index + 1}: ${log}`);
-                });
+            analysis.networkConditions = {
+                currentBlockhash: blockhash,
+                lastValidBlockHeight,
+                timestamp: Date.now()
+            };
+
+            if (enableDiagnostics) {
+                console.log(`[PreSigningAnalysis] Network conditions: Block height ${lastValidBlockHeight}, Blockhash: ${blockhash.slice(0, 8)}...`);
+            }
+
+        } catch (error) {
+            console.warn(`[PreSigningAnalysis] Could not check network conditions: ${error.message}`);
+            analysis.networkError = error.message;
+        }
+
+        const analysisTime = Date.now() - startTime;
+        analysis.analysisTimeMs = analysisTime;
+
+        if (enableDiagnostics) {
+            console.log(`[PreSigningAnalysis] ✅ Analysis completed in ${analysisTime}ms for: ${transactionContext}`);
+            if (analysis.recommendations.length > 0) {
+                console.log(`[PreSigningAnalysis] Recommendations:`, analysis.recommendations);
             }
         }
-
-        diagnostics.postSimulationAnalysis.successAnalysis = {
-            unitsConsumed: simulationResult.value.unitsConsumed,
-            logCount: simulationResult.value.logs?.length || 0,
-            simulationTimeMs: simulationTime
-        };
 
         return {
             success: true,
-            simulationResult: simulationResult.value,
-            diagnostics
+            analysis,
+            recommendations: analysis.recommendations
         };
 
     } catch (error) {
-        const simulationTime = Date.now() - startTime;
-        console.error(`[TransactionDiagnostics] ❌ Simulation ERROR for: ${transactionContext} after ${simulationTime}ms`);
-        console.error(`[TransactionDiagnostics] Error details:`, error.message);
+        const analysisTime = Date.now() - startTime;
+        console.error(`[PreSigningAnalysis] ❌ Analysis failed for: ${transactionContext} after ${analysisTime}ms`);
+        console.error(`[PreSigningAnalysis] Error: ${error.message}`);
 
-        diagnostics.postSimulationAnalysis.simulationError = {
+        analysis.analysisError = {
             message: error.message,
             stack: error.stack,
-            simulationTimeMs: simulationTime
+            analysisTimeMs: analysisTime
         };
 
         return {
             success: false,
-            simulationResult: null,
-            diagnostics,
-            error: error.message
+            analysis,
+            recommendations: ['ANALYSIS_ERROR: Pre-signing analysis failed - ' + error.message]
         };
     }
 }
@@ -1065,7 +980,7 @@ let lastJitoBundleSend = 0;
 
 /**
  * Sends a bundle of transactions to the Jito Block Engine with retries.
- * Enhanced with optional RPC config integration and improved error context.
+ * Enhanced with blockhash refresh capability and improved error context.
  * Includes global rate limiting to prevent burst requests that cause 429 errors.
  * @param {string[]} encodedSignedTxs_base58 - Array of base58 encoded signed transactions.
  * @param {object} [jitoOptions] - Options for Jito interaction.
@@ -1074,6 +989,7 @@ let lastJitoBundleSend = 0;
  * @param {number} [jitoOptions.initialDelay] - Initial retry delay.
  * @param {number} [jitoOptions.maxDelay] - Max retry delay.
  * @param {boolean} [jitoOptions.useRpcConfig] - Use RPC config for adaptive timing.
+ * @param {Function} [jitoOptions.onBlockhashExpired] - Callback when blockhash expires (should return new signed transactions)
  * @returns {Promise<string>} The bundle ID.
  */
 async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = {}) {
@@ -1133,6 +1049,26 @@ async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = 
                 console.warn(`[TransactionUtils] Rate limited by Jito sendBundle. Waiting ${waitTime / 1000} seconds...`);
                 await sleep(waitTime);
                 currentDelay = Math.min(currentDelay * 2, maxDelay);
+            } else if (response.status === 400 && errorText.includes('expired blockhash')) {
+                console.warn(`[TransactionUtils] Blockhash expired during Jito retries. Attempting refresh...`);
+                if (jitoOptions.onBlockhashExpired && typeof jitoOptions.onBlockhashExpired === 'function') {
+                    try {
+                        console.log(`[TransactionUtils] Calling blockhash refresh callback...`);
+                        const newSignedTxs = await jitoOptions.onBlockhashExpired();
+                        if (newSignedTxs && newSignedTxs.length === encodedSignedTxs_base58.length) {
+                            console.log(`[TransactionUtils] ✅ Blockhash refreshed, using new signed transactions`);
+                            encodedSignedTxs_base58 = newSignedTxs; // Use refreshed transactions
+                            currentDelay = jitoOptions.initialDelay || INITIAL_RETRY_DELAY_JITO_SEND; // Reset delay
+                        } else {
+                            throw new Error('Blockhash refresh callback returned invalid transactions');
+                        }
+                    } catch (refreshError) {
+                        console.error(`[TransactionUtils] Blockhash refresh failed: ${refreshError.message}`);
+                        throw new Error(`Blockhash expired and refresh failed: ${refreshError.message}`);
+                    }
+                } else {
+                    throw new Error(`Blockhash expired and no refresh callback provided. Response: ${errorText}`);
+                }
             } else {
                 throw new Error(`Failed to send Jito bundle: HTTP ${response.status}. Response: ${errorText}`);
             }
@@ -1376,7 +1312,7 @@ module.exports = {
     // REMOVED: pollBundleStatus - deprecated to prevent rate limiting
     
     // Debugging and diagnostics functions
-    simulateTransactionWithDiagnostics, // NEW: Comprehensive transaction simulation with diagnostics
+    analyzeRawTransaction, // NEW: Pre-signing transaction analysis
 
     // Make constants available for configuration if needed by services
     MAX_RETRIES_JITO_SEND,
