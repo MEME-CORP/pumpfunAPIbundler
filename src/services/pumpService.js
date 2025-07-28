@@ -20,7 +20,7 @@ const {
     DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE,
     DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL
 } = require('../utils/pumpAndJitoUtils');
-const { sendJitoBundleWithRetries, pollBundleStatus, waitForBundleViaWebSocket, sleep, getRecentBlockhash } = require('../utils/transactionUtils');
+const { sendJitoBundleWithRetries, pollBundleStatus, waitForBundleViaWebSocket, sleep, getRecentBlockhash, JITO_ENDPOINTS } = require('../utils/transactionUtils');
 
 // MONOCODE Compliance: Fix bs58 decoder compatibility issue
 const bs58Decoder = bs58.default || bs58;
@@ -326,9 +326,9 @@ async function createAndBuyService(
             recentBlockhashData, // Pass full blockhash data
             mintKeypair // Mint keypair signs the create transaction
         );
-        
+
         rawTransactionsFromApi.forEach((tx, i) => {
-            results.transactions.push({
+            result.transactions.push({
                 walletName: walletSignerMap[i].wallet.name,
                 action: bundledTxArgs[i].action,
                 rawTx: tx,
@@ -336,27 +336,48 @@ async function createAndBuyService(
             });
         });
 
-        // 7. Send Jito Bundle
-        console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle...`);
-        const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
-        results.bundleId = bundleId;
-        console.log(`Bundle sent with ID: ${bundleId}`);
+        console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle for create and buy...`);
+
+        // MONOCODE Compliance: Endpoint rotation with rate limit handling
+        let bundleId;
+        let currentEndpointIndex = 0;
+        const maxRetries = 3;
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const jitoEndpoint = JITO_ENDPOINTS[currentEndpointIndex];
+            console.log(`[PumpService] Create & Buy, Attempt ${attempt}/${maxRetries} using endpoint: ${jitoEndpoint}`);
+
+            try {
+                bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, { jitoEndpoint });
+                result.bundleId = bundleId;
+                console.log(`Create and buy bundle sent with ID: ${bundleId}`);
+                break; // Success
+            } catch (error) {
+                if (error.message === 'JITO_RATE_LIMITED' && attempt < maxRetries) {
+                    console.log(`[PumpService] ⚠️ Rate limited on ${jitoEndpoint}, rotating to next endpoint for create & buy...`);
+                    currentEndpointIndex = (currentEndpointIndex + 1) % JITO_ENDPOINTS.length;
+                    await sleep(1500); // 1.5s delay
+                    continue;
+                } else {
+                    throw error; // Rethrow on non-rate-limit error or final attempt
+                }
+            }
+        }
 
         // 8. WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
         console.log(`[PumpService] Waiting for bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
         try {
             await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
+            result.success = true;
+            result.message = `Token ${tokenMetadata.symbol} created and initial buys completed successfully in bundle ${bundleId}. Mint: ${result.mintAddress}`;
             console.log(`[PumpService] ✅ Bundle confirmed successfully via WebSocket!`);
         } catch (error) {
             throw new Error(`Bundle ${bundleId} WebSocket confirmation failed: ${error.message}`);
         }
-        
-        results.success = true;
-        results.message = `Token ${tokenMetadata.symbol} created and initial buys completed successfully in bundle ${bundleId}. Mint: ${results.mintAddress}`;
-        console.log(results.message);
+
         // Save mint address
         await fs.mkdir(path.dirname(LATEST_MINT_FILE), { recursive: true });
-        await fs.writeFile(LATEST_MINT_FILE, results.mintAddress);
+        await fs.writeFile(LATEST_MINT_FILE, result.mintAddress);
         console.log(`Saved new mint address to ${LATEST_MINT_FILE}`);
         
 
@@ -503,10 +524,33 @@ async function batchBuyService(
                     });
                 });
 
-                console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle for batch ${i + 1}...`);
-                const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
-                batchBundleResult.bundleId = bundleId;
-                console.log(`Batch ${i + 1} bundle sent with ID: ${bundleId}`);
+                console.log(`Sending ${batch.length}-TX Jito bundle for batch ${i + 1} of ${numBatches}...`);
+
+                // MONOCODE Compliance: Endpoint rotation with rate limit handling
+                let bundleId;
+                let currentEndpointIndex = 0;
+                const maxRetries = 3;
+
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    const jitoEndpoint = JITO_ENDPOINTS[currentEndpointIndex];
+                    console.log(`[PumpService] Batch ${i + 1}, Attempt ${attempt}/${maxRetries} using endpoint: ${jitoEndpoint}`);
+
+                    try {
+                        bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, { jitoEndpoint });
+                        batchBundleResult.bundleId = bundleId;
+                        console.log(`Batch buy bundle ${i + 1} sent with ID: ${bundleId}`);
+                        break; // Success
+                    } catch (error) {
+                        if (error.message === 'JITO_RATE_LIMITED' && attempt < maxRetries) {
+                            console.log(`[PumpService] ⚠️ Rate limited on ${jitoEndpoint}, rotating to next endpoint for batch ${i + 1}...`);
+                            currentEndpointIndex = (currentEndpointIndex + 1) % JITO_ENDPOINTS.length;
+                            await sleep(1500); // 1.5s delay
+                            continue;
+                        } else {
+                            throw error; // Rethrow on non-rate-limit error or final attempt
+                        }
+                    }
+                }
 
                 // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
                 console.log(`[PumpService] Waiting for batch ${i + 1} bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
@@ -641,9 +685,34 @@ async function devSellService(
         });
 
         console.log(`Sending 1-TX Jito bundle for DevWallet sell...`);
-        const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
-        result.bundleId = bundleId;
-        console.log(`DevWallet sell bundle sent with ID: ${bundleId}`);
+        
+        // MONOCODE Compliance: Endpoint rotation with rate limit handling
+        let bundleId;
+        let currentEndpointIndex = 0;
+        const maxRetries = 3;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const jitoEndpoint = JITO_ENDPOINTS[currentEndpointIndex];
+            console.log(`[PumpService] Attempt ${attempt}/${maxRetries} using endpoint: ${jitoEndpoint}`);
+            
+            try {
+                bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, { jitoEndpoint });
+                result.bundleId = bundleId;
+                console.log(`DevWallet sell bundle sent with ID: ${bundleId}`);
+                break; // Success, exit retry loop
+            } catch (error) {
+                if (error.message === 'JITO_RATE_LIMITED' && attempt < maxRetries) {
+                    console.log(`[PumpService] ⚠️ Rate limited on ${jitoEndpoint}, rotating to next endpoint...`);
+                    currentEndpointIndex = (currentEndpointIndex + 1) % JITO_ENDPOINTS.length;
+                    // MONOCODE Compliance: 1-2 second delay between endpoint changes
+                    await sleep(1500); // 1.5 seconds delay
+                    continue;
+                } else {
+                    // Non-rate-limit error or final attempt - rethrow
+                    throw error;
+                }
+            }
+        }
 
         // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
         console.log(`[PumpService] Waiting for DevWallet sell bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
@@ -798,10 +867,33 @@ async function batchSellService(
                     });
                 });
 
-                console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle for batch ${i + 1}...`);
-                const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
-                batchBundleResult.bundleId = bundleId;
-                console.log(`Batch ${i + 1} bundle sent with ID: ${bundleId}`);
+                console.log(`Sending ${batch.length}-TX Jito bundle for batch ${i + 1} of ${numBatches}...`);
+                
+                // MONOCODE Compliance: Endpoint rotation with rate limit handling
+                let bundleId;
+                let currentEndpointIndex = 0;
+                const maxRetries = 3;
+
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    const jitoEndpoint = JITO_ENDPOINTS[currentEndpointIndex];
+                    console.log(`[PumpService] Batch ${i + 1}, Attempt ${attempt}/${maxRetries} using endpoint: ${jitoEndpoint}`);
+
+                    try {
+                        bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, { jitoEndpoint });
+                        batchBundleResult.bundleId = bundleId;
+                        console.log(`Batch sell bundle ${i + 1} sent with ID: ${bundleId}`);
+                        break; // Success
+                    } catch (error) {
+                        if (error.message === 'JITO_RATE_LIMITED' && attempt < maxRetries) {
+                            console.log(`[PumpService] ⚠️ Rate limited on ${jitoEndpoint}, rotating to next endpoint for batch ${i + 1}...`);
+                            currentEndpointIndex = (currentEndpointIndex + 1) % JITO_ENDPOINTS.length;
+                            await sleep(1500); // 1.5s delay
+                            continue;
+                        } else {
+                            throw error; // Rethrow on non-rate-limit error or final attempt
+                        }
+                    }
+                }
 
                 // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
                 console.log(`[PumpService] Waiting for batch ${i + 1} sell bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);

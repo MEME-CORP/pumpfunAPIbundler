@@ -855,7 +855,17 @@ const INITIAL_RETRY_DELAY_JITO_SEND = 2000;
 const MAX_RETRY_DELAY_JITO_SEND = 30000;
 const BUNDLE_STATUS_POLL_INTERVAL = 2000;
 const BUNDLE_STATUS_POLL_ATTEMPTS = 10; // Default, can be overridden
-const JITO_REGIONAL_ENDPOINT = 'https://mainnet.block-engine.jito.wtf/api/v1/bundles'; // mainnet endpoint for better performance
+// MONOCODE Compliance: Centralized Jito endpoints for dynamic rotation
+// Prioritized list of Jito Block Engine endpoints for rate limit resilience
+const JITO_ENDPOINTS = [
+    'https://mainnet.block-engine.jito.wtf/api/v1/bundles',
+    'https://amsterdam.mainnet.block-engine.jito.wtf/api/v1/bundles',
+    'https://ny.mainnet.block-engine.jito.wtf/api/v1/bundles', 
+    'https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/bundles'
+];
+
+// Legacy endpoint constant for backward compatibility
+const JITO_REGIONAL_ENDPOINT = JITO_ENDPOINTS[0]; // Default to first endpoint
 
 // Global rate limiter for Jito bundle sends to prevent burst requests
 const JITO_SEND_INTERVAL_MS = 1000; // 1 second minimum between bundle sends
@@ -926,11 +936,13 @@ async function sendJitoBundleWithRetries(encodedSignedTxs_base58, jitoOptions = 
 
             const errorText = await response.text();
             if (response.status === 429) { // Rate limited
-                const retryAfterHeader = response.headers.get('Retry-After');
-                const waitTime = retryAfterHeader ? parseInt(retryAfterHeader) * 1000 : currentDelay;
-                console.warn(`[TransactionUtils] Rate limited by Jito sendBundle. Waiting ${waitTime / 1000} seconds...`);
-                await sleep(waitTime);
-                currentDelay = Math.min(currentDelay * 2, maxDelay);
+                // MONOCODE Compliance: Throw specific error for endpoint rotation
+                const rateLimitError = new Error('JITO_RATE_LIMITED');
+                rateLimitError.statusCode = 429;
+                rateLimitError.endpoint = endpoint;
+                rateLimitError.retryAfter = response.headers.get('Retry-After');
+                console.warn(`[TransactionUtils] ⚠️ Rate limited by Jito endpoint ${endpoint} (429). Endpoint rotation required.`);
+                throw rateLimitError;
             } else {
                 throw new Error(`Failed to send Jito bundle: HTTP ${response.status}. Response: ${errorText}`);
             }
@@ -1171,13 +1183,11 @@ module.exports = {
     sendJitoBundleWithRetries,
     confirmBundleWebSocketOnly, // NEW: Recommended WebSocket-only bundle confirmation
     waitForBundleViaWebSocket, // Existing WebSocket-based bundle confirmation
-    // REMOVED: pollBundleStatus - deprecated to prevent rate limiting
-
-    // Make constants available for configuration if needed by services
+    JITO_ENDPOINTS, // NEW: Endpoint array for dynamic rotation
+    JITO_REGIONAL_ENDPOINT, // Make constants available for configuration if needed by services
     MAX_RETRIES_JITO_SEND,
     INITIAL_RETRY_DELAY_JITO_SEND,
     MAX_RETRY_DELAY_JITO_SEND,
     BUNDLE_STATUS_POLL_INTERVAL, // Kept for legacy compatibility but not used
     BUNDLE_STATUS_POLL_ATTEMPTS, // Kept for legacy compatibility but not used
-    JITO_REGIONAL_ENDPOINT
 }; 
