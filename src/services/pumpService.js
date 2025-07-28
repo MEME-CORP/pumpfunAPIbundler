@@ -3,19 +3,19 @@ const bs58 = require('bs58');
 const fs = require('fs').promises; // Still needed for LATEST_MINT_FILE operations
 const path = require('path'); // Still needed for LATEST_MINT_FILE path
 const { Keypair, SystemProgram, LAMPORTS_PER_SOL } = web3;
-const { 
-    loadKeypairFromFile, 
-    loadChildWalletsFromFile, 
-    getWalletBalance, 
+const {
+    loadKeypairFromFile,
+    loadChildWalletsFromFile,
+    getWalletBalance,
     getSolanaConnection,
     WALLETS_DIR,
     MOTHER_WALLET_FILE, // Though likely not used directly here
     CHILD_WALLETS_FILE
 } = require('../utils/walletUtils');
 const { validateWalletsForTokenOperations } = require('./walletService');
-const { 
-    uploadMetadataToPumpPortal, 
-    getTransactionsFromPumpPortal, 
+const {
+    uploadMetadataToPumpPortal,
+    getTransactionsFromPumpPortal,
     preparePumpTransactionsForJito,
     DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE,
     DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL
@@ -34,7 +34,7 @@ const MIN_SOL_BALANCE_TIPPER = 0.055;
 const MIN_SOL_BALANCE_NON_TIPPER = 0.025;
 
 // Placeholder for where to save the mint address, similar to latestMint_05script_2tx.txt
-const LATEST_MINT_FILE = path.join(process.cwd(), 'data', 'latestMint_API.txt'); 
+const LATEST_MINT_FILE = path.join(process.cwd(), 'data', 'latestMint_API.txt');
 
 /**
  * Validates SOL balances for wallets involved in token operations with rent consideration
@@ -46,15 +46,15 @@ const LATEST_MINT_FILE = path.join(process.cwd(), 'data', 'latestMint_API.txt');
  */
 async function checkWalletBalancesForTokenOperations(wallets, operationOptions = {}) {
     const { solSpendPerWallet = 0 } = operationOptions;
-    
+
     console.log(`[PumpService] Validating ${wallets.length} wallets for token operations (may create ATAs)`);
-    
+
     // Group wallets by tipper status for more accurate validation
     const tippers = wallets.filter(w => w.isTipper);
     const nonTippers = wallets.filter(w => !w.isTipper);
-    
+
     let allValid = true;
-    
+
     // Validate tippers (higher requirements due to Jito tips)
     if (tippers.length > 0) {
         console.log(`[PumpService] Validating ${tippers.length} tipper wallet(s)...`);
@@ -63,7 +63,7 @@ async function checkWalletBalancesForTokenOperations(wallets, operationOptions =
             mayCreateTokenAccounts: true,
             isTipper: true
         });
-        
+
         if (!tipperValidation.overallValid) {
             console.error(`[PumpService] ❌ ${tipperValidation.summary.invalidCount} tipper wallet(s) have insufficient balance`);
             for (const invalid of tipperValidation.invalidWallets) {
@@ -74,7 +74,7 @@ async function checkWalletBalancesForTokenOperations(wallets, operationOptions =
             allValid = false;
         }
     }
-    
+
     // Validate non-tippers
     if (nonTippers.length > 0) {
         console.log(`[PumpService] Validating ${nonTippers.length} non-tipper wallet(s)...`);
@@ -83,7 +83,7 @@ async function checkWalletBalancesForTokenOperations(wallets, operationOptions =
             mayCreateTokenAccounts: true,
             isTipper: false
         });
-        
+
         if (!nonTipperValidation.overallValid) {
             console.error(`[PumpService] ❌ ${nonTipperValidation.summary.invalidCount} non-tipper wallet(s) have insufficient balance`);
             for (const invalid of nonTipperValidation.invalidWallets) {
@@ -94,13 +94,13 @@ async function checkWalletBalancesForTokenOperations(wallets, operationOptions =
             allValid = false;
         }
     }
-    
+
     if (allValid) {
         console.log(`[PumpService] ✅ All wallets have sufficient balance for token operations (including rent exemption)`);
     } else {
         console.error(`[PumpService] ❌ Some wallets have insufficient balance. Token operations may fail with 'Insufficient Funds For Rent' errors.`);
     }
-    
+
     return allValid;
 }
 
@@ -159,7 +159,7 @@ async function createAndBuyService(
 
         // Identify participating wallets based on buy amounts
         const participatingWallets = [];
-        
+
         // Add DevWallet as tipper (for create transaction)
         participatingWallets.push({ ...devWallet, isTipper: true });
 
@@ -203,9 +203,9 @@ async function createAndBuyService(
                 .filter(key => key.startsWith('firstBundledWallet'))
                 .map(key => buyAmountsSOL[key] || 0)
         );
-        
-        if (!await checkWalletBalancesForTokenOperations(uniqueWalletsForBalanceCheck, { 
-            solSpendPerWallet: maxBuyAmount 
+
+        if (!await checkWalletBalancesForTokenOperations(uniqueWalletsForBalanceCheck, {
+            solSpendPerWallet: maxBuyAmount
         })) {
             throw new Error("Insufficient SOL balance in one or more participating wallets for token operations (including rent exemption requirements).");
         }
@@ -220,7 +220,7 @@ async function createAndBuyService(
         } else {
             console.log(`[PumpService] No image provided. Creating token with metadata only.`);
         }
-        
+
         // Filter tokenMetadata to only include fields needed for IPFS metadata (exclude createAmountSOL)
         const metadataForUpload = {
             name: tokenMetadata.name,
@@ -231,7 +231,7 @@ async function createAndBuyService(
             website: tokenMetadata.website,
             showName: tokenMetadata.showName
         };
-        
+
         results.metadataUri = await uploadMetadataToPumpPortal(metadataForUpload, imageBuffer, imageFileName);
         console.log(`Token metadata uploaded to IPFS: ${results.metadataUri}`);
 
@@ -271,7 +271,7 @@ async function createAndBuyService(
         if (buyAmountsSOL.devWalletBuySOL > 0) {
             buyers.push({ wallet: devWallet, buySOL: buyAmountsSOL.devWalletBuySOL });
         }
-        
+
         for (let i = 1; i <= MAX_BUYERS_IN_CREATE_BUNDLE; i++) {
             const buyKey = `firstBundledWallet${i}BuySOL`;
             if (buyAmountsSOL[buyKey] > 0) {
@@ -282,9 +282,9 @@ async function createAndBuyService(
                 }
             }
         }
-        
+
         if (buyers.length + bundledTxArgs.length > 5) { // +1 for the create transaction
-             throw new Error(`Too many transactions for a single Jito bundle. Max 5. Requested: ${buyers.length + 1}`);
+            throw new Error(`Too many transactions for a single Jito bundle. Max 5. Requested: ${buyers.length + 1}`);
         }
 
         buyers.forEach(buyerInfo => {
@@ -300,7 +300,7 @@ async function createAndBuyService(
             });
             walletSignerMap.push({ wallet: buyerInfo.wallet, isCreate: false });
         });
-        
+
         // 5. Get Serialized Transactions from Pump Portal
         const rawTransactionsFromApi = await getTransactionsFromPumpPortal(bundledTxArgs);
         if (rawTransactionsFromApi.length !== bundledTxArgs.length) {
@@ -311,14 +311,14 @@ async function createAndBuyService(
         const enablePreSigningAnalysis = process.env.ENABLE_PRESIGNING_ANALYSIS === 'true';
         if (enablePreSigningAnalysis) {
             console.log(`[PumpService] 🔍 Running pre-signing analysis for ${rawTransactionsFromApi.length} transactions...`);
-            
+
             for (let i = 0; i < rawTransactionsFromApi.length; i++) {
                 const walletInfo = {
                     name: walletSignerMap[i].wallet.name,
                     publicKey: walletSignerMap[i].wallet.publicKey
                 };
                 const action = bundledTxArgs[i].action;
-                
+
                 const analysisResult = await analyzeRawTransaction(
                     connection,
                     rawTransactionsFromApi[i],
@@ -326,7 +326,7 @@ async function createAndBuyService(
                     walletInfo,
                     { enableDiagnostics: true }
                 );
-                
+
                 if (!analysisResult.success) {
                     console.warn(`[PumpService] ⚠️ Pre-signing analysis failed for ${walletInfo.name} (${action}):`, analysisResult.recommendations);
                 } else if (analysisResult.recommendations.length > 0) {
@@ -340,7 +340,7 @@ async function createAndBuyService(
         // 6. Prepare and Sign Transactions for Jito
         const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
         console.log(`[PumpService] Using fresh blockhash: ${blockhash.slice(0, 8)}... Valid until: ${lastValidBlockHeight}`);
-        
+
         const walletKeypairsForSigning = walletSignerMap.map(item => ({
             name: item.wallet.name,
             keypair: item.wallet.keypair, // Assuming keypair is loaded in childWallets
@@ -349,14 +349,14 @@ async function createAndBuyService(
 
         // MONOCODE Fix: Pass full blockhash data to match working test pattern
         const recentBlockhashData = { blockhash, lastValidBlockHeight };
-        
+
         const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
             rawTransactionsFromApi,
             walletKeypairsForSigning, // This expects array of {name, keypair, publicKey}
             recentBlockhashData, // Pass full blockhash data
             mintKeypair // Mint keypair signs the create transaction
         );
-        
+
         rawTransactionsFromApi.forEach((tx, i) => {
             results.transactions.push({
                 walletName: walletSignerMap[i].wallet.name,
@@ -368,13 +368,13 @@ async function createAndBuyService(
 
         // 7. Send Jito Bundle with blockhash refresh capability
         console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle...`);
-        
+
         // Create blockhash refresh callback
         const refreshBlockhashAndResign = async () => {
             console.log(`[PumpService] 🔄 Refreshing blockhash and re-signing transactions...`);
             const { blockhash: newBlockhash, lastValidBlockHeight: newLastValidBlockHeight } = await getRecentBlockhash(connection);
             console.log(`[PumpService] New blockhash: ${newBlockhash.slice(0, 8)}... Valid until: ${newLastValidBlockHeight}`);
-            
+
             const newRecentBlockhashData = { blockhash: newBlockhash, lastValidBlockHeight: newLastValidBlockHeight };
             const { signedEncodedTransactions: newSignedTxs } = await preparePumpTransactionsForJito(
                 rawTransactionsFromApi,
@@ -382,10 +382,10 @@ async function createAndBuyService(
                 newRecentBlockhashData,
                 mintKeypair
             );
-            
+
             return newSignedTxs;
         };
-        
+
         const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, {
             onBlockhashExpired: refreshBlockhashAndResign
         });
@@ -400,7 +400,7 @@ async function createAndBuyService(
         } catch (error) {
             throw new Error(`Bundle ${bundleId} WebSocket confirmation failed: ${error.message}`);
         }
-        
+
         results.success = true;
         results.message = `Token ${tokenMetadata.symbol} created and initial buys completed successfully in bundle ${bundleId}. Mint: ${results.mintAddress}`;
         console.log(results.message);
@@ -408,7 +408,7 @@ async function createAndBuyService(
         await fs.mkdir(path.dirname(LATEST_MINT_FILE), { recursive: true });
         await fs.writeFile(LATEST_MINT_FILE, results.mintAddress);
         console.log(`Saved new mint address to ${LATEST_MINT_FILE}`);
-        
+
 
     } catch (error) {
         console.error("Error in createAndBuyService:", error);
@@ -425,9 +425,9 @@ async function createAndBuyService(
  * Buys in batches of up to MAX_WALLETS_PER_BUNDLE.
  */
 async function batchBuyService(
-    mintAddress, 
-    solAmountPerWallet, 
-    slippageBps = 2500, 
+    mintAddress,
+    solAmountPerWallet,
+    slippageBps = 2500,
     targetWalletNames, // Optional: array of specific child wallet names to use (must be eligible)
     wallets // Required: Array of { name: string, privateKey: string } - API-provided wallets
 ) {
@@ -503,8 +503,8 @@ async function batchBuyService(
                     ...wallet,
                     isTipper: index === 0 // First wallet in batch is the tipper
                 }));
-                if (!await checkWalletBalancesForTokenOperations(walletsForBalanceCheck, { 
-                    solSpendPerWallet: solAmountPerWallet 
+                if (!await checkWalletBalancesForTokenOperations(walletsForBalanceCheck, {
+                    solSpendPerWallet: solAmountPerWallet
                 })) {
                     throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
                 }
@@ -531,19 +531,48 @@ async function batchBuyService(
                     throw new Error(`Mismatch in transactions from Pump Portal for batch ${i + 1}.`);
                 }
 
+                // Pre-signing transaction analysis (new approach)
+                const enablePreSigningAnalysis = process.env.ENABLE_PRESIGNING_ANALYSIS === 'true';
+                if (enablePreSigningAnalysis) {
+                    console.log(`[PumpService] 🔍 Running pre-signing analysis for batch ${i + 1} (${rawTransactionsFromApi.length} transactions)...`);
+
+                    for (let txIdx = 0; txIdx < rawTransactionsFromApi.length; txIdx++) {
+                        const walletInfo = {
+                            name: walletSignerMap[txIdx].wallet.name,
+                            publicKey: walletSignerMap[txIdx].wallet.publicKey
+                        };
+
+                        const analysisResult = await analyzeRawTransaction(
+                            connection,
+                            rawTransactionsFromApi[txIdx],
+                            `BatchBuy Batch ${i + 1} - Wallet: ${walletInfo.name}, Action: buy`,
+                            walletInfo,
+                            { enableDiagnostics: true }
+                        );
+
+                        if (!analysisResult.success) {
+                            console.warn(`[PumpService] ⚠️ Pre-signing analysis failed for batch ${i + 1}, ${walletInfo.name} (buy):`, analysisResult.recommendations);
+                        } else if (analysisResult.recommendations.length > 0) {
+                            console.warn(`[PumpService] ⚠️ Pre-signing analysis warnings for batch ${i + 1}, ${walletInfo.name} (buy):`, analysisResult.recommendations);
+                        } else {
+                            console.log(`[PumpService] ✅ Pre-signing analysis passed for batch ${i + 1}, ${walletInfo.name} (buy)`);
+                        }
+                    }
+                }
+
                 const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
-                const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet); 
+                const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet);
 
                 // MONOCODE Fix: Pass full blockhash data to match working test pattern
                 const recentBlockhashData = { blockhash, lastValidBlockHeight };
-                
+
                 const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
                     rawTransactionsFromApi,
                     walletKeypairsForSigning,
                     recentBlockhashData, // Pass full blockhash data
                     null // No mintKeypair for buys
                 );
-                
+
                 rawTransactionsFromApi.forEach((tx, idx) => {
                     batchBundleResult.transactions.push({
                         walletName: walletSignerMap[idx].wallet.name,
@@ -552,6 +581,37 @@ async function batchBuyService(
                         signedTx: signedEncodedTransactions[idx]
                     });
                 });
+
+                // Post-signing transaction simulation (comprehensive approach)
+                const enableSignedTransactionSimulation = process.env.ENABLE_SIGNED_SIMULATION === 'true';
+                if (enableSignedTransactionSimulation) {
+                    console.log(`[PumpService] 🔍 Running signed transaction simulation for batch ${i + 1} (${signedEncodedTransactions.length} transactions)...`);
+
+                    for (let txIdx = 0; txIdx < signedEncodedTransactions.length; txIdx++) {
+                        try {
+                            const transactionBuffer = Buffer.from(signedEncodedTransactions[txIdx], 'base64');
+                            const transaction = web3.Transaction.from(transactionBuffer);
+                            const walletName = walletSignerMap[txIdx].wallet.name;
+
+                            const simulationResult = await simulateSignedTransaction(
+                                connection,
+                                transaction,
+                                `BatchBuy Batch ${i + 1} - Wallet: ${walletName}, Action: buy`,
+                                { enableDiagnostics: true }
+                            );
+
+                            if (!simulationResult.success) {
+                                console.error(`[PumpService] ❌ Signed simulation FAILED for batch ${i + 1}, ${walletName} (buy):`, simulationResult.recommendations);
+                                // Continue with bundle submission even if simulation fails (for debugging purposes)
+                            } else {
+                                console.log(`[PumpService] ✅ Signed simulation PASSED for batch ${i + 1}, ${walletName} (buy) - Units: ${simulationResult.simulationResult.unitsConsumed}`);
+                            }
+                        } catch (simulationError) {
+                            console.warn(`[PumpService] ⚠️ Signed simulation failed for batch ${i + 1}, transaction ${txIdx + 1}: ${simulationError.message}`);
+                            console.warn(`[PumpService] Continuing with bundle submission (simulation is non-critical)`);
+                        }
+                    }
+                }
 
                 console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle for batch ${i + 1}...`);
                 const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
@@ -646,7 +706,7 @@ async function devSellService(
         console.log(`Attempting to sell ${sellAmountPercentage} of ${mintAddress} from DevWallet (${devWallet.publicKey}).`);
 
         // DevWallet is the tipper for this single transaction bundle
-        if (!await checkWalletBalancesForTokenOperations([{ ...devWallet, isTipper: true }], { 
+        if (!await checkWalletBalancesForTokenOperations([{ ...devWallet, isTipper: true }], {
             solSpendPerWallet: 0 // Selling tokens doesn't require SOL spend, but may need rent for ATAs
         })) {
             throw new Error("Insufficient SOL balance in DevWallet to cover transaction and Jito tip (including rent exemption requirements).");
@@ -662,12 +722,39 @@ async function devSellService(
             priorityFee: DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE, // Keep as SOL, don't convert to lamports
             pool: "pump",
         }];
-        
+
         const walletSignerMap = [{ wallet: devWallet, isCreate: false }];
 
         const rawTransactionsFromApi = await getTransactionsFromPumpPortal(bundledTxArgs);
         if (rawTransactionsFromApi.length !== 1) {
             throw new Error("Expected 1 transaction from Pump Portal for dev sell.");
+        }
+
+        // Pre-signing transaction analysis (new approach)
+        const enablePreSigningAnalysis = process.env.ENABLE_PRESIGNING_ANALYSIS === 'true';
+        if (enablePreSigningAnalysis) {
+            console.log(`[PumpService] 🔍 Running pre-signing analysis for DevWallet sell...`);
+
+            const walletInfo = {
+                name: devWallet.name,
+                publicKey: devWallet.publicKey
+            };
+
+            const analysisResult = await analyzeRawTransaction(
+                connection,
+                rawTransactionsFromApi[0],
+                `DevSell - Wallet: ${walletInfo.name}, Action: sell`,
+                walletInfo,
+                { enableDiagnostics: true }
+            );
+
+            if (!analysisResult.success) {
+                console.warn(`[PumpService] ⚠️ Pre-signing analysis failed for ${walletInfo.name} (sell):`, analysisResult.recommendations);
+            } else if (analysisResult.recommendations.length > 0) {
+                console.warn(`[PumpService] ⚠️ Pre-signing analysis warnings for ${walletInfo.name} (sell):`, analysisResult.recommendations);
+            } else {
+                console.log(`[PumpService] ✅ Pre-signing analysis passed for ${walletInfo.name} (sell)`);
+            }
         }
 
         const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
@@ -689,6 +776,34 @@ async function devSellService(
             rawTx: rawTransactionsFromApi[0],
             signedTx: signedEncodedTransactions[0]
         });
+
+        // Post-signing transaction simulation (comprehensive approach)
+        const enableSignedTransactionSimulation = process.env.ENABLE_SIGNED_SIMULATION === 'true';
+        if (enableSignedTransactionSimulation) {
+            console.log(`[PumpService] 🔍 Running signed transaction simulation for DevWallet sell...`);
+
+            try {
+                const transactionBuffer = Buffer.from(signedEncodedTransactions[0], 'base64');
+                const transaction = web3.Transaction.from(transactionBuffer);
+
+                const simulationResult = await simulateSignedTransaction(
+                    connection,
+                    transaction,
+                    `DevSell - Wallet: ${devWallet.name}, Action: sell`,
+                    { enableDiagnostics: true }
+                );
+
+                if (!simulationResult.success) {
+                    console.error(`[PumpService] ❌ Signed simulation FAILED for ${devWallet.name} (sell):`, simulationResult.recommendations);
+                    // Continue with bundle submission even if simulation fails (for debugging purposes)
+                } else {
+                    console.log(`[PumpService] ✅ Signed simulation PASSED for ${devWallet.name} (sell) - Units: ${simulationResult.simulationResult.unitsConsumed}`);
+                }
+            } catch (simulationError) {
+                console.warn(`[PumpService] ⚠️ Signed simulation failed for DevWallet sell: ${simulationError.message}`);
+                console.warn(`[PumpService] Continuing with bundle submission (simulation is non-critical)`);
+            }
+        }
 
         console.log(`Sending 1-TX Jito bundle for DevWallet sell...`);
         const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
@@ -798,7 +913,7 @@ async function batchSellService(
                     ...wallet,
                     isTipper: index === 0 // First wallet in batch is the tipper
                 }));
-                if (!await checkWalletBalancesForTokenOperations(walletsForBalanceCheck, { 
+                if (!await checkWalletBalancesForTokenOperations(walletsForBalanceCheck, {
                     solSpendPerWallet: 0 // Selling tokens doesn't require SOL spend, but may need rent for ATAs
                 })) {
                     throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
@@ -826,6 +941,35 @@ async function batchSellService(
                     throw new Error(`Mismatch in transactions from Pump Portal for batch ${i + 1}.`);
                 }
 
+                // Pre-signing transaction analysis (new approach)
+                const enablePreSigningAnalysis = process.env.ENABLE_PRESIGNING_ANALYSIS === 'true';
+                if (enablePreSigningAnalysis) {
+                    console.log(`[PumpService] 🔍 Running pre-signing analysis for batch ${i + 1} (${rawTransactionsFromApi.length} transactions)...`);
+
+                    for (let txIdx = 0; txIdx < rawTransactionsFromApi.length; txIdx++) {
+                        const walletInfo = {
+                            name: walletSignerMap[txIdx].wallet.name,
+                            publicKey: walletSignerMap[txIdx].wallet.publicKey
+                        };
+
+                        const analysisResult = await analyzeRawTransaction(
+                            connection,
+                            rawTransactionsFromApi[txIdx],
+                            `BatchSell Batch ${i + 1} - Wallet: ${walletInfo.name}, Action: sell`,
+                            walletInfo,
+                            { enableDiagnostics: true }
+                        );
+
+                        if (!analysisResult.success) {
+                            console.warn(`[PumpService] ⚠️ Pre-signing analysis failed for batch ${i + 1}, ${walletInfo.name} (sell):`, analysisResult.recommendations);
+                        } else if (analysisResult.recommendations.length > 0) {
+                            console.warn(`[PumpService] ⚠️ Pre-signing analysis warnings for batch ${i + 1}, ${walletInfo.name} (sell):`, analysisResult.recommendations);
+                        } else {
+                            console.log(`[PumpService] ✅ Pre-signing analysis passed for batch ${i + 1}, ${walletInfo.name} (sell)`);
+                        }
+                    }
+                }
+
                 const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
                 const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet);
 
@@ -838,7 +982,7 @@ async function batchSellService(
                     recentBlockhashData, // Pass full blockhash data
                     null // No mintKeypair for sells
                 );
-                
+
                 rawTransactionsFromApi.forEach((tx, idx) => {
                     batchBundleResult.transactions.push({
                         walletName: walletSignerMap[idx].wallet.name,
@@ -847,6 +991,37 @@ async function batchSellService(
                         signedTx: signedEncodedTransactions[idx]
                     });
                 });
+
+                // Post-signing transaction simulation (comprehensive approach)
+                const enableSignedTransactionSimulation = process.env.ENABLE_SIGNED_SIMULATION === 'true';
+                if (enableSignedTransactionSimulation) {
+                    console.log(`[PumpService] 🔍 Running signed transaction simulation for batch ${i + 1} (${signedEncodedTransactions.length} transactions)...`);
+
+                    for (let txIdx = 0; txIdx < signedEncodedTransactions.length; txIdx++) {
+                        try {
+                            const transactionBuffer = Buffer.from(signedEncodedTransactions[txIdx], 'base64');
+                            const transaction = web3.Transaction.from(transactionBuffer);
+                            const walletName = walletSignerMap[txIdx].wallet.name;
+
+                            const simulationResult = await simulateSignedTransaction(
+                                connection,
+                                transaction,
+                                `BatchSell Batch ${i + 1} - Wallet: ${walletName}, Action: sell`,
+                                { enableDiagnostics: true }
+                            );
+
+                            if (!simulationResult.success) {
+                                console.error(`[PumpService] ❌ Signed simulation FAILED for batch ${i + 1}, ${walletName} (sell):`, simulationResult.recommendations);
+                                // Continue with bundle submission even if simulation fails (for debugging purposes)
+                            } else {
+                                console.log(`[PumpService] ✅ Signed simulation PASSED for batch ${i + 1}, ${walletName} (sell) - Units: ${simulationResult.simulationResult.unitsConsumed}`);
+                            }
+                        } catch (simulationError) {
+                            console.warn(`[PumpService] ⚠️ Signed simulation failed for batch ${i + 1}, transaction ${txIdx + 1}: ${simulationError.message}`);
+                            console.warn(`[PumpService] Continuing with bundle submission (simulation is non-critical)`);
+                        }
+                    }
+                }
 
                 console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle for batch ${i + 1}...`);
                 const bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions);
