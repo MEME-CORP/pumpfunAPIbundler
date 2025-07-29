@@ -1,3 +1,8 @@
+/**
+ * ONCE pump servise work with local transactions this file is deprecrated or meant to be used
+ *  with future jito services sepaqated from local transactions 
+ */
+
 const fetch = require('node-fetch');
 const bs58 = require('bs58');
 const web3 = require('@solana/web3.js');

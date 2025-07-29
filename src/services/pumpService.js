@@ -338,7 +338,7 @@ async function createAndBuyService(
             Math.floor(slippageBps / 100)
         );
         
-        result.transactions.push({
+        results.transactions.push({
             walletName: devWallet.name,
             action: 'create',
             signature: createSignature,
