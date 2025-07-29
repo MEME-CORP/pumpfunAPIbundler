@@ -11,6 +11,7 @@
 const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
 const fetch = require('node-fetch');
+const FormData = require('form-data'); // MONOCODE Fix: Use form-data package for proper multipart headers with node-fetch v2
 const { getSolanaConnection } = require('../utils/walletUtils');
 const { sleep, confirmTransactionAdvanced } = require('../utils/transactionUtils');
 
