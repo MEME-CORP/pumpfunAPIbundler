@@ -33,6 +33,7 @@ const {
 } = require('../utils/pumpAndJitoUtils');
 const { 
     createTokenLocalTransaction, 
+    executeTradeLocalTransaction,
     executeParallelTransactions, 
     confirmParallelTransactions,
     confirmTransactionViaWebSocket,
@@ -641,40 +642,36 @@ async function devSellService(
         console.log(`[PumpService] Executing DevWallet sell transaction for ${sellAmountPercentage} of ${mintAddress}...`);
 
         // Execute single sell transaction using local transaction service
-        const sellResult = await executeBuyOrSellLocalTransaction({
-            action: 'sell',
-            mintAddress: mintAddress,
-            signerKeypair: devWallet.keypair,
-            amount: sellAmountPercentage,
-            denominatedInSol: false,
-            slippage: slippageBps
-        });
+        const sellSignature = await executeTradeLocalTransaction(
+            'sell',
+            mintAddress,
+            devWallet.keypair,
+            sellAmountPercentage,
+            false, // denominatedInSol
+            slippageBps
+        );
 
-        result.transactions.push({
+        results.transactions.push({
             walletName: devWallet.name,
             action: "sell",
-            signature: sellResult.signature || null,
-            success: sellResult.success,
-            error: sellResult.error || null,
-            amount: sellResult.amount
+            signature: sellSignature,
+            success: true,
+            error: null,
+            amount: sellAmountPercentage
         });
 
-        if (sellResult.success) {
-            console.log(`[PumpService] ✅ DevWallet sell transaction successful: ${sellResult.signature}`);
-            
-            // Confirm the sell transaction via WebSocket
-            console.log(`[PumpService] Confirming DevWallet sell transaction via WebSocket...`);
-            const confirmed = await confirmTransactionViaWebSocket(sellResult.signature, 'confirmed', 30000);
-            
-            if (confirmed) {
-                result.success = true;
-                result.message = `DevWallet successfully sold ${sellAmountPercentage} of ${mintAddress}. Transaction: ${sellResult.signature}`;
-                console.log(`[PumpService] ✅ DevWallet sell transaction confirmed!`);
-            } else {
-                throw new Error(`DevWallet sell transaction ${sellResult.signature} confirmation failed`);
-            }
+        console.log(`[PumpService] ✅ DevWallet sell transaction successful: ${sellSignature}`);
+        
+        // Confirm the sell transaction via WebSocket
+        console.log(`[PumpService] Confirming DevWallet sell transaction via WebSocket...`);
+        const confirmed = await confirmTransactionViaWebSocket(sellSignature, 'confirmed', 30000);
+        
+        if (confirmed) {
+            results.success = true;
+            results.message = `DevWallet successfully sold ${sellAmountPercentage} of ${mintAddress}. Transaction: ${sellSignature}`;
+            console.log(`[PumpService] ✅ DevWallet sell transaction confirmed!`);
         } else {
-            throw new Error(`DevWallet sell transaction failed: ${sellResult.error}`);
+            throw new Error(`DevWallet sell transaction ${sellSignature} confirmation failed`);
         }
 
     } catch (error) {
