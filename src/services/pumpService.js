@@ -308,28 +308,33 @@ async function createAndBuyService(
         });
         walletSignerMap.push({ wallet: devWallet, isCreate: true });
 
-        // Tx 2+: Buys (DevWallet if applicable, then First Bundled Wallets)
+        // Tx 2+: Buys (Dynamic processing - all wallets with buy amounts)
         const buyers = [];
-        if (buyAmountsSOL.devWalletBuySOL > 0) {
-            buyers.push({ wallet: devWallet, buySOL: buyAmountsSOL.devWalletBuySOL });
-        }
         
-        for (let i = 1; i <= MAX_BUYERS_IN_CREATE_BUNDLE; i++) {
-            const buyKey = `firstBundledWallet${i}BuySOL`;
+        // Process all buy amount keys dynamically
+        Object.keys(buyAmountsSOL).forEach(buyKey => {
             if (buyAmountsSOL[buyKey] > 0) {
-                const walletName = `${FIRST_BUNDLED_BASE_NAME} ${i}`;
-                const wallet = loadedWallets.find(w => w.name === walletName);
-                if (wallet) {
-                    buyers.push({ wallet: wallet, buySOL: buyAmountsSOL[buyKey] });
+                // Find matching wallet using the same logic as the validation phase
+                const matchingWallet = loadedWallets.find(wallet => {
+                    const normalizedWalletName = wallet.name.toLowerCase().replace(/\s+/g, '');
+                    const normalizedBuyKey = buyKey.replace('BuySOL', '').toLowerCase();
+                    return normalizedWalletName === normalizedBuyKey;
+                });
+                
+                if (matchingWallet) {
+                    buyers.push({ wallet: matchingWallet, buySOL: buyAmountsSOL[buyKey] });
+                    console.log(`[PumpService] Added buyer: ${matchingWallet.name} with ${buyAmountsSOL[buyKey]} SOL`);
+                } else {
+                    console.warn(`[PumpService] No wallet found for buy key: ${buyKey}`);
                 }
             }
-        }
+        });
         
         // MONOCODE Fix: Remove Jito bundle limit - now using local parallel transactions
         console.log(`[PumpService] Processing ${buyers.length} buy transactions + 1 create transaction via local parallel execution`);
         
-        // Local transactions support batching - no hard limit needed
-        if (buyers.length > 20) {
+        // Local transactions support batching - no hard limit needed // but there is a pseudo hard limit for buyers length now at 200 wallets
+        if (buyers.length > 200) {
             console.warn(`[PumpService] Warning: ${buyers.length} buy transactions requested. Consider using batch-buy endpoint for better performance.`);
         }
 
