@@ -325,8 +325,12 @@ async function createAndBuyService(
             }
         }
         
-        if (buyers.length + bundledTxArgs.length > 5) { // +1 for the create transaction
-             throw new Error(`Too many transactions for a single Jito bundle. Max 5. Requested: ${buyers.length + 1}`);
+        // MONOCODE Fix: Remove Jito bundle limit - now using local parallel transactions
+        console.log(`[PumpService] Processing ${buyers.length} buy transactions + 1 create transaction via local parallel execution`);
+        
+        // Local transactions support batching - no hard limit needed
+        if (buyers.length > 20) {
+            console.warn(`[PumpService] Warning: ${buyers.length} buy transactions requested. Consider using batch-buy endpoint for better performance.`);
         }
 
         buyers.forEach(buyerInfo => {
