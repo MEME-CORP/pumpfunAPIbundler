@@ -361,7 +361,7 @@ async function createAndBuyService(
             
             const buyRequests = buyers.map(buyerInfo => ({
                 action: 'buy',
-                mintAddress: result.mintAddress,
+                mintAddress: results.mintAddress,
                 signerKeypair: buyerInfo.wallet.keypair,
                 amount: buyerInfo.buySOL,
                 denominatedInSol: true,
@@ -374,7 +374,7 @@ async function createAndBuyService(
             
             // Add buy results to transactions array
             buyResults.forEach(buyResult => {
-                result.transactions.push({
+                results.transactions.push({
                     walletName: buyResult.walletName,
                     action: buyResult.action,
                     signature: buyResult.signature || null,
@@ -397,13 +397,13 @@ async function createAndBuyService(
             }
         }
         
-        result.success = true;
-        result.message = `Token ${tokenMetadata.symbol} created and ${buyers.length} buy transactions completed successfully. Mint: ${result.mintAddress}`;
+        results.success = true;
+        results.message = `Token ${tokenMetadata.symbol} created and ${buyers.length} buy transactions completed successfully. Mint: ${results.mintAddress}`;
         console.log(`[PumpService] ✅ Create and buy service completed successfully!`);
 
         // Save mint address
         await fs.mkdir(path.dirname(LATEST_MINT_FILE), { recursive: true });
-        await fs.writeFile(LATEST_MINT_FILE, result.mintAddress);
+        await fs.writeFile(LATEST_MINT_FILE, results.mintAddress);
         console.log(`Saved new mint address to ${LATEST_MINT_FILE}`);
         
 
