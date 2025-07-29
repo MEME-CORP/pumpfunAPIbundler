@@ -262,18 +262,52 @@ The API now supports secure image uploads for token creation using multipart/for
   - Images are processed in memory and uploaded to Pinata IPFS for decentralized storage. No files are saved to disk.
   - **buyAmountsSOL must be a valid JSON string** when using multipart/form-data (not a JavaScript object).
   - **wallets must be a valid JSON string** containing an array of wallet objects with `name` and `privateKey` properties.
-  - **Required Wallet Names:**
-    - Must include `"DevWallet"` as the creator wallet
-    - Buying wallets should be named `"First Bundled Wallet 1"`, `"First Bundled Wallet 2"`, etc.
-    - Private keys must be base58 encoded Solana keypairs
+  - Private keys must be base58 encoded Solana keypairs
   - **Minimum SOL Balance Requirements:**
     - DevWallet (tipper): Requires **0.055 SOL** minimum + create amount + buy amount
     - Other wallets: Require **0.025 SOL** minimum + buy amount
     - Example: For 0.001 SOL create + 0.01 SOL buy, DevWallet needs 0.066 SOL total, other wallets need 0.035 SOL total
-    - **IMPORTANT Wallet Naming Convention:**
-    - The creating wallet **MUST** be named `"DevWallet"`.
-    - Initial buying wallets **MUST** be named `"First Bundled Wallet 1"`, `"First Bundled Wallet 2"`, etc., up to a maximum of 4.
-    - The endpoint is hardcoded to use these specific names to orchestrate the creation and initial buy bundle. Failure to adhere to this naming will result in an error.
+
+#### **📋 How Create-and-Buy Works**
+
+**The `/api/pump/create-and-buy` endpoint processes wallets dynamically based on the `buyAmountsSOL` object you provide.**
+
+##### **Wallet Processing Logic:**
+1. **DevWallet (Required)**: Must be named exactly `"DevWallet"` - this wallet creates the token and optionally buys
+2. **Buying Wallets (Flexible)**: Any wallet can participate in buying if you include it in `buyAmountsSOL`
+
+##### **buyAmountsSOL Key Matching:**
+The service matches `buyAmountsSOL` keys to wallet names using flexible pattern matching:
+- `"firstBundledWallet1BuySOL"` → matches wallet named `"First Bundled Wallet 1"`
+- `"childWallet1BuySOL"` → matches wallet named `"Child Wallet 1"`
+- `"myCustomWalletBuySOL"` → matches wallet named `"My Custom Wallet"`
+
+##### **Example Request Structure:**
+```json
+{
+  "buyAmountsSOL": {
+    "devWalletBuySOL": 0.01,
+    "firstBundledWallet1BuySOL": 0.005,
+    "firstBundledWallet2BuySOL": 0.005,
+    "childWallet1BuySOL": 0.003,
+    "childWallet2BuySOL": 0.003
+  },
+  "wallets": [
+    {"name": "DevWallet", "privateKey": "base58_key_here"},
+    {"name": "First Bundled Wallet 1", "privateKey": "base58_key_here"},
+    {"name": "First Bundled Wallet 2", "privateKey": "base58_key_here"},
+    {"name": "Child Wallet 1", "privateKey": "base58_key_here"},
+    {"name": "Child Wallet 2", "privateKey": "base58_key_here"}
+  ]
+}
+```
+
+##### **⚠️ Important Rules:**
+- **DevWallet is mandatory** and must be named exactly `"DevWallet"`
+- **Only wallets with corresponding `buyAmountsSOL` entries will participate in buying**
+- **Wallets without buy amounts are ignored** (except DevWallet which always creates the token)
+- **Wallet names are matched flexibly** - spaces and capitalization variations are handled automatically
+- **All participating wallets must have sufficient SOL balance** for their buy amount plus fees
 
 #### 2. Batch Buy Token
 - **POST** `/api/pump/batch-buy`

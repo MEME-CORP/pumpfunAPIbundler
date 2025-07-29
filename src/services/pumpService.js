@@ -189,16 +189,37 @@ async function createAndBuyService(
             // DevWallet is both creator and buyer - already added as tipper
         }
 
-        // Add first bundled wallets that are buying
-        for (let i = 1; i <= MAX_BUYERS_IN_CREATE_BUNDLE; i++) {
-            const buyKey = `firstBundledWallet${i}BuySOL`;
-            if (buyAmountsSOL[buyKey] > 0) {
-                const walletName = `${FIRST_BUNDLED_BASE_NAME} ${i}`;
-                const wallet = loadedWallets.find(w => w.name === walletName);
-                if (wallet) {
-                    participatingWallets.push({ ...wallet, isTipper: false });
+        // MONOCODE Fix: Process ALL wallets with buy amounts (not just hardcoded names)
+        console.log(`[PumpService] Processing buy amounts for all provided wallets...`);
+        
+        // Process all buy amount keys to find participating wallets
+        for (const [buyKey, buyAmount] of Object.entries(buyAmountsSOL)) {
+            if (buyKey !== 'devWalletBuySOL' && buyAmount > 0) {
+                console.log(`[PumpService] Found buy amount: ${buyKey} = ${buyAmount} SOL`);
+                
+                // Find corresponding wallet by matching buy key pattern to wallet name
+                let matchingWallet = null;
+                
+                // Try different naming patterns
+                const patterns = [
+                    buyKey.replace('BuySOL', '').replace(/([A-Z])/g, ' $1').trim().replace(/^\w/, c => c.toUpperCase()), // camelCase to Title Case
+                    buyKey.replace('BuySOL', ''), // Direct match without transformation
+                ];
+                
+                for (const pattern of patterns) {
+                    matchingWallet = loadedWallets.find(w => 
+                        w.name.toLowerCase().replace(/\s+/g, '') === pattern.toLowerCase().replace(/\s+/g, '')
+                    );
+                    if (matchingWallet) {
+                        console.log(`[PumpService] Matched wallet "${matchingWallet.name}" to buy key "${buyKey}"`);
+                        break;
+                    }
+                }
+                
+                if (matchingWallet) {
+                    participatingWallets.push({ ...matchingWallet, isTipper: false });
                 } else {
-                    throw new Error(`Wallet "${walletName}" not found in provided wallets array but is required for buying.`);
+                    console.warn(`[PumpService] Warning: No wallet found matching buy key "${buyKey}". Available wallets: ${loadedWallets.map(w => w.name).join(', ')}`);
                 }
             }
         }

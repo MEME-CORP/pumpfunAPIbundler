@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
+const { getAssociatedTokenAddress } = require('@solana/spl-token'); // MONOCODE: Add for getTokenBalance
 
 // Configuration for wallet storage - API services will use this.
 // For now, defaults to a 'data/wallets' directory in the project root.
@@ -202,6 +203,33 @@ async function getWalletBalance(connection, publicKey) {
     }
 }
 
+/**
+ * Gets the token balance of a given public key for a specific mint.
+ * @param {web3.Connection} connection Solana connection object.
+ * @param {web3.PublicKey} walletPublicKey The public key of the wallet.
+ * @param {web3.PublicKey} mintPublicKey The public key of the token mint.
+ * @returns {Promise<number>} The token balance (uiAmount).
+ */
+async function getTokenBalance(connection, walletPublicKey, mintPublicKey) {
+    try {
+        const tokenAccount = await getAssociatedTokenAddress(
+            mintPublicKey,
+            walletPublicKey,
+            true // allowOwnerOffCurve - set to true for associated token accounts
+        );
+
+        const balance = await connection.getTokenAccountBalance(tokenAccount);
+        return balance.value.uiAmount || 0;
+    } catch (error) {
+        if (error.message.includes('could not find account')) {
+            // It's common for a wallet to not have a token account if it has no tokens
+            return 0;
+        }
+        console.error(`Error getting token balance for wallet ${walletPublicKey.toBase58()} and mint ${mintPublicKey.toBase58()}:`, error);
+        return 0; // Return 0 on error to prevent transaction failures
+    }
+}
+
 // Solana connection configuration - this should be configurable for the API
 // For now, keeping it simple.
 let solanaConnection;
@@ -219,6 +247,7 @@ module.exports = {
     loadChildWalletsFromFile,
     saveChildWalletsToFile,
     getWalletBalance,
+    getTokenBalance, // MONOCODE: Export getTokenBalance for SPL token balance validation
     ensureWalletsDirectoryExists,
     getSolanaConnection,
     WALLETS_DIR,
