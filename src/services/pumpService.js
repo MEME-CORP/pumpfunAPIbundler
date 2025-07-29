@@ -594,7 +594,7 @@ async function devSellService(
     wallets // Required: Array of { name: string, privateKey: string } - API-provided wallets
 ) {
     const connection = getSolanaConnection();
-    const result = {
+    const results = {
         success: false,
         message: '',
         mintAddress: mintAddress,
@@ -676,10 +676,10 @@ async function devSellService(
 
     } catch (error) {
         console.error("Error in devSellService:", error);
-        result.message = error.message;
-        result.success = false;
+        results.message = error.message;
+        results.success = false;
     }
-    return result;
+    return results;
 }
 
 /**
