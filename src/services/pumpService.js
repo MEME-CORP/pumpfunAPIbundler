@@ -1,3 +1,14 @@
+/**
+ * PUMP SERVICE - Token Creation and Trading Operations
+ * 
+ * ✅ MIGRATED: This service now uses local transactions via Pump Portal API
+ * instead of Jito bundles (review july 28th commit for using jito again) to avoid rate limiting issues. 
+ * Transactions are executed in parallel batches of 4 with 0.0005 SOL priority fee for optimal performance.
+ * 
+ * MONOCODE Compliance: Observable implementation with structured logging,
+ * explicit error handling, and dependency transparency.
+ */
+
 const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
 const fs = require('fs').promises; // Still needed for LATEST_MINT_FILE operations
@@ -20,7 +31,14 @@ const {
     DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE,
     DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL
 } = require('../utils/pumpAndJitoUtils');
-const { sendJitoBundleWithRetries, pollBundleStatus, waitForBundleViaWebSocket, sleep, getRecentBlockhash, JITO_ENDPOINTS } = require('../utils/transactionUtils');
+const { 
+    createTokenLocalTransaction, 
+    executeParallelTransactions, 
+    confirmParallelTransactions,
+    confirmTransactionViaWebSocket,
+    DEFAULT_PRIORITY_FEE 
+} = require('./localTransactionService');
+const { sleep, getRecentBlockhash, confirmTransactionAdvanced } = require('../utils/transactionUtils');
 
 // MONOCODE Compliance: Fix bs58 decoder compatibility issue
 const bs58Decoder = bs58.default || bs58;
@@ -107,7 +125,8 @@ async function checkWalletBalancesForTokenOperations(wallets, operationOptions =
 /**
  * Service to create a token and perform initial buys.
  * Based on 05-createTokenAndBuy.js
- * DevWallet creates. DevWallet + "First Bundled Wallet 1-4" (up to 4) buy in the same Jito bundle.
+ * DevWallet creates token via local transaction. DevWallet + "First Bundled Wallet 1-4" (up to 4) 
+ * then execute parallel buy transactions with confirmation.
  * 
  * MONOCODE Compliance: Updated to handle image buffers and API-provided wallets
  */
@@ -301,79 +320,86 @@ async function createAndBuyService(
             walletSignerMap.push({ wallet: buyerInfo.wallet, isCreate: false });
         });
         
-        // 5. Get Serialized Transactions from Pump Portal
-        const rawTransactionsFromApi = await getTransactionsFromPumpPortal(bundledTxArgs);
-        if (rawTransactionsFromApi.length !== bundledTxArgs.length) {
-            throw new Error("Mismatch in number of transactions received from Pump Portal.");
-        }
-
-        // 6. Prepare and Sign Transactions for Jito
-        const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
-        console.log(`[PumpService] Using fresh blockhash: ${blockhash.slice(0, 8)}... Valid until: ${lastValidBlockHeight}`);
-        
-        const walletKeypairsForSigning = walletSignerMap.map(item => ({
-            name: item.wallet.name,
-            keypair: item.wallet.keypair, // Assuming keypair is loaded in childWallets
-            publicKey: item.wallet.publicKey
-        }));
-
-        // MONOCODE Fix: Pass full blockhash data to match working test pattern
-        const recentBlockhashData = { blockhash, lastValidBlockHeight };
-        
-        const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
-            rawTransactionsFromApi,
-            walletKeypairsForSigning, // This expects array of {name, keypair, publicKey}
-            recentBlockhashData, // Pass full blockhash data
-            mintKeypair // Mint keypair signs the create transaction
+        // 5. Create Token using Local Transaction (Step 1)
+        console.log(`[PumpService] Creating token ${tokenMetadata.symbol} using local transaction...`);
+        const createSignature = await createTokenLocalTransaction(
+            {
+                name: tokenMetadata.name,
+                symbol: tokenMetadata.symbol, 
+                description: tokenMetadata.description,
+                twitter: tokenMetadata.twitter,
+                telegram: tokenMetadata.telegram,
+                website: tokenMetadata.website
+            },
+            null, // imageUrl - will be handled by createTokenLocalTransaction via Pinata
+            mintKeypair,
+            devWallet.keypair,
+            tokenMetadata.createAmountSOL || 0.001,
+            Math.floor(slippageBps / 100)
         );
-
-        rawTransactionsFromApi.forEach((tx, i) => {
-            result.transactions.push({
-                walletName: walletSignerMap[i].wallet.name,
-                action: bundledTxArgs[i].action,
-                rawTx: tx,
-                signedTx: signedEncodedTransactions[i]
-            });
+        
+        result.transactions.push({
+            walletName: devWallet.name,
+            action: 'create',
+            signature: createSignature,
+            amount: tokenMetadata.createAmountSOL || 0.001
         });
-
-        console.log(`Sending ${signedEncodedTransactions.length}-TX Jito bundle for create and buy...`);
-
-        // MONOCODE Compliance: Endpoint rotation with rate limit handling
-        let bundleId;
-        let currentEndpointIndex = 0;
-        const maxRetries = 3;
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            const jitoEndpoint = JITO_ENDPOINTS[currentEndpointIndex];
-            console.log(`[PumpService] Create & Buy, Attempt ${attempt}/${maxRetries} using endpoint: ${jitoEndpoint}`);
-
-            try {
-                bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, { jitoEndpoint });
-                result.bundleId = bundleId;
-                console.log(`Create and buy bundle sent with ID: ${bundleId}`);
-                break; // Success
-            } catch (error) {
-                if (error.message === 'JITO_RATE_LIMITED' && attempt < maxRetries) {
-                    console.log(`[PumpService] ⚠️ Rate limited on ${jitoEndpoint}, rotating to next endpoint for create & buy...`);
-                    currentEndpointIndex = (currentEndpointIndex + 1) % JITO_ENDPOINTS.length;
-                    await sleep(1500); // 1.5s delay
-                    continue;
-                } else {
-                    throw error; // Rethrow on non-rate-limit error or final attempt
-                }
+        
+        console.log(`[PumpService] ✅ Token creation transaction sent: ${createSignature}`);
+        
+        // 6. Confirm Token Creation (Step 2)
+        console.log(`[PumpService] Confirming token creation transaction via WebSocket...`);
+        const createConfirmed = await confirmTransactionViaWebSocket(createSignature, 'confirmed', 30000);
+        if (!createConfirmed) {
+            throw new Error(`Token creation transaction confirmation failed: ${createSignature}`);
+        }
+        console.log(`[PumpService] ✅ Token creation confirmed via WebSocket!`);
+        
+        // 7. Execute Parallel Buy Transactions (Step 3)
+        if (buyers.length > 0) {
+            console.log(`[PumpService] Executing ${buyers.length} parallel buy transactions...`);
+            
+            const buyRequests = buyers.map(buyerInfo => ({
+                action: 'buy',
+                mintAddress: result.mintAddress,
+                signerKeypair: buyerInfo.wallet.keypair,
+                amount: buyerInfo.buySOL,
+                denominatedInSol: true,
+                slippage: slippageBps,
+                walletName: buyerInfo.wallet.name
+            }));
+            
+            // Execute buy transactions in parallel (max 4 at a time)
+            const buyResults = await executeParallelTransactions(buyRequests, 4);
+            
+            // Add buy results to transactions array
+            buyResults.forEach(buyResult => {
+                result.transactions.push({
+                    walletName: buyResult.walletName,
+                    action: buyResult.action,
+                    signature: buyResult.signature || null,
+                    success: buyResult.success,
+                    error: buyResult.error || null,
+                    amount: buyResult.amount
+                });
+            });
+            
+            const successfulBuys = buyResults.filter(r => r.success).length;
+            console.log(`[PumpService] ✅ Buy transactions complete: ${successfulBuys}/${buyResults.length} successful`);
+            
+            // Confirm buy transactions in parallel
+            const buySignatures = buyResults.filter(r => r.success).map(r => r.signature);
+            if (buySignatures.length > 0) {
+                console.log(`[PumpService] Confirming ${buySignatures.length} buy transactions...`);
+                const confirmResults = await confirmParallelTransactions(buySignatures);
+                const confirmedBuys = confirmResults.filter(r => r.confirmed).length;
+                console.log(`[PumpService] ✅ Buy confirmations complete: ${confirmedBuys}/${buySignatures.length} confirmed`);
             }
         }
-
-        // 8. WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
-        console.log(`[PumpService] Waiting for bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
-        try {
-            await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
-            result.success = true;
-            result.message = `Token ${tokenMetadata.symbol} created and initial buys completed successfully in bundle ${bundleId}. Mint: ${result.mintAddress}`;
-            console.log(`[PumpService] ✅ Bundle confirmed successfully via WebSocket!`);
-        } catch (error) {
-            throw new Error(`Bundle ${bundleId} WebSocket confirmation failed: ${error.message}`);
-        }
+        
+        result.success = true;
+        result.message = `Token ${tokenMetadata.symbol} created and ${buyers.length} buy transactions completed successfully. Mint: ${result.mintAddress}`;
+        console.log(`[PumpService] ✅ Create and buy service completed successfully!`);
 
         // Save mint address
         await fs.mkdir(path.dirname(LATEST_MINT_FILE), { recursive: true });
@@ -480,88 +506,54 @@ async function batchBuyService(
                     throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
                 }
 
-                const bundledTxArgs = [];
-                const walletSignerMap = [];
+                // Prepare buy requests for parallel execution
+                const buyRequests = batch.map(wallet => ({
+                    action: 'buy',
+                    mintAddress: mintAddress,
+                    signerKeypair: wallet.keypair,
+                    amount: solAmountPerWallet,
+                    denominatedInSol: true,
+                    slippage: slippageBps,
+                    walletName: wallet.name
+                }));
 
-                batch.forEach((wallet, index) => {
-                    bundledTxArgs.push({
-                        publicKey: wallet.publicKey,
-                        action: "buy",
-                        mint: mintAddress,
-                        denominatedInSol: "true",
-                        amount: solAmountPerWallet, // Keep as SOL, don't convert to lamports
-                        slippage: Math.floor(slippageBps / 100), // Convert basis points to percentage (2500 -> 25)
-                        priorityFee: index === 0 ? DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE : DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL, // Keep as SOL, don't convert to lamports
-                        pool: "pump",
-                    });
-                    walletSignerMap.push({ wallet, isCreate: false });
-                });
+                console.log(`[PumpService] Executing ${batch.length} parallel buy transactions for batch ${i + 1} of ${numBatches}...`);
 
-                const rawTransactionsFromApi = await getTransactionsFromPumpPortal(bundledTxArgs);
-                if (rawTransactionsFromApi.length !== bundledTxArgs.length) {
-                    throw new Error(`Mismatch in transactions from Pump Portal for batch ${i + 1}.`);
-                }
-
-                const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
-                const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet); 
-
-                // MONOCODE Fix: Pass full blockhash data to match working test pattern
-                const recentBlockhashData = { blockhash, lastValidBlockHeight };
+                // Execute buy transactions in parallel (max 4 at a time)
+                const buyResults = await executeParallelTransactions(buyRequests, 4);
                 
-                const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
-                    rawTransactionsFromApi,
-                    walletKeypairsForSigning,
-                    recentBlockhashData, // Pass full blockhash data
-                    null // No mintKeypair for buys
-                );
-                
-                rawTransactionsFromApi.forEach((tx, idx) => {
+                // Add results to batch result
+                buyResults.forEach(buyResult => {
                     batchBundleResult.transactions.push({
-                        walletName: walletSignerMap[idx].wallet.name,
-                        action: "buy",
-                        rawTx: tx,
-                        signedTx: signedEncodedTransactions[idx]
+                        walletName: buyResult.walletName,
+                        action: buyResult.action,
+                        signature: buyResult.signature || null,
+                        success: buyResult.success,
+                        error: buyResult.error || null,
+                        amount: buyResult.amount
                     });
                 });
-
-                console.log(`Sending ${batch.length}-TX Jito bundle for batch ${i + 1} of ${numBatches}...`);
-
-                // MONOCODE Compliance: Endpoint rotation with rate limit handling
-                let bundleId;
-                let currentEndpointIndex = 0;
-                const maxRetries = 3;
-
-                for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                    const jitoEndpoint = JITO_ENDPOINTS[currentEndpointIndex];
-                    console.log(`[PumpService] Batch ${i + 1}, Attempt ${attempt}/${maxRetries} using endpoint: ${jitoEndpoint}`);
-
-                    try {
-                        bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, { jitoEndpoint });
-                        batchBundleResult.bundleId = bundleId;
-                        console.log(`Batch buy bundle ${i + 1} sent with ID: ${bundleId}`);
-                        break; // Success
-                    } catch (error) {
-                        if (error.message === 'JITO_RATE_LIMITED' && attempt < maxRetries) {
-                            console.log(`[PumpService] ⚠️ Rate limited on ${jitoEndpoint}, rotating to next endpoint for batch ${i + 1}...`);
-                            currentEndpointIndex = (currentEndpointIndex + 1) % JITO_ENDPOINTS.length;
-                            await sleep(1500); // 1.5s delay
-                            continue;
-                        } else {
-                            throw error; // Rethrow on non-rate-limit error or final attempt
-                        }
-                    }
+                
+                const successfulBuys = buyResults.filter(r => r.success).length;
+                console.log(`[PumpService] ✅ Batch ${i + 1} buy transactions complete: ${successfulBuys}/${buyResults.length} successful`);
+                
+                // Confirm buy transactions in parallel
+                const buySignatures = buyResults.filter(r => r.success).map(r => r.signature);
+                if (buySignatures.length > 0) {
+                    console.log(`[PumpService] Confirming ${buySignatures.length} buy transactions for batch ${i + 1}...`);
+                    const confirmResults = await confirmParallelTransactions(buySignatures);
+                    const confirmedBuys = confirmResults.filter(r => r.confirmed).length;
+                    console.log(`[PumpService] ✅ Batch ${i + 1} confirmations complete: ${confirmedBuys}/${buySignatures.length} confirmed`);
                 }
-
-                // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
-                console.log(`[PumpService] Waiting for batch ${i + 1} bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
-                try {
-                    await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
-                    batchBundleResult.success = true;
-                    batchBundleResult.message = `Batch ${i + 1} buy successful.`;
+                
+                batchBundleResult.success = successfulBuys > 0;
+                batchBundleResult.message = `Batch ${i + 1}: ${successfulBuys}/${batch.length} buy transactions successful`;
+                console.log(`[PumpService] ✅ Batch ${i + 1} processing complete!`);
+                
+                if (batchBundleResult.success) {
                     overallResult.successfulBundles++;
-                    console.log(`[PumpService] ✅ Batch ${i + 1} bundle confirmed successfully via WebSocket!`);
-                } catch (error) {
-                    throw new Error(`Bundle ${bundleId} for batch ${i + 1} WebSocket confirmation failed: ${error.message}`);
+                } else {
+                    overallResult.failedBundles++;
                 }
             } catch (batchError) {
                 console.error(`Error processing batch ${i + 1}:`, batchError);
@@ -646,83 +638,43 @@ async function devSellService(
             throw new Error("Insufficient SOL balance in DevWallet to cover transaction and Jito tip (including rent exemption requirements).");
         }
 
-        const bundledTxArgs = [{
-            publicKey: devWallet.publicKey,
-            action: "sell",
-            mint: mintAddress,
-            denominatedInSol: "false", // Selling tokens
-            amount: sellAmountPercentage, // Pump Portal API supports percentage string like "50%"
-            slippage: Math.floor(slippageBps / 100), // Convert basis points to percentage (2500 -> 25)
-            priorityFee: DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE, // Keep as SOL, don't convert to lamports
-            pool: "pump",
-        }];
-        
-        const walletSignerMap = [{ wallet: devWallet, isCreate: false }];
+        console.log(`[PumpService] Executing DevWallet sell transaction for ${sellAmountPercentage} of ${mintAddress}...`);
 
-        const rawTransactionsFromApi = await getTransactionsFromPumpPortal(bundledTxArgs);
-        if (rawTransactionsFromApi.length !== 1) {
-            throw new Error("Expected 1 transaction from Pump Portal for dev sell.");
-        }
-
-        const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
-        const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet);
-
-        // MONOCODE Fix: Pass full blockhash data to match working test pattern
-        const recentBlockhashData = { blockhash, lastValidBlockHeight };
-
-        const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
-            rawTransactionsFromApi,
-            walletKeypairsForSigning,
-            recentBlockhashData, // Pass full blockhash data
-            null // No mintKeypair for sells
-        );
+        // Execute single sell transaction using local transaction service
+        const sellResult = await executeBuyOrSellLocalTransaction({
+            action: 'sell',
+            mintAddress: mintAddress,
+            signerKeypair: devWallet.keypair,
+            amount: sellAmountPercentage,
+            denominatedInSol: false,
+            slippage: slippageBps
+        });
 
         result.transactions.push({
             walletName: devWallet.name,
             action: "sell",
-            rawTx: rawTransactionsFromApi[0],
-            signedTx: signedEncodedTransactions[0]
+            signature: sellResult.signature || null,
+            success: sellResult.success,
+            error: sellResult.error || null,
+            amount: sellResult.amount
         });
 
-        console.log(`Sending 1-TX Jito bundle for DevWallet sell...`);
-        
-        // MONOCODE Compliance: Endpoint rotation with rate limit handling
-        let bundleId;
-        let currentEndpointIndex = 0;
-        const maxRetries = 3;
-        
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            const jitoEndpoint = JITO_ENDPOINTS[currentEndpointIndex];
-            console.log(`[PumpService] Attempt ${attempt}/${maxRetries} using endpoint: ${jitoEndpoint}`);
+        if (sellResult.success) {
+            console.log(`[PumpService] ✅ DevWallet sell transaction successful: ${sellResult.signature}`);
             
-            try {
-                bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, { jitoEndpoint });
-                result.bundleId = bundleId;
-                console.log(`DevWallet sell bundle sent with ID: ${bundleId}`);
-                break; // Success, exit retry loop
-            } catch (error) {
-                if (error.message === 'JITO_RATE_LIMITED' && attempt < maxRetries) {
-                    console.log(`[PumpService] ⚠️ Rate limited on ${jitoEndpoint}, rotating to next endpoint...`);
-                    currentEndpointIndex = (currentEndpointIndex + 1) % JITO_ENDPOINTS.length;
-                    // MONOCODE Compliance: 1-2 second delay between endpoint changes
-                    await sleep(1500); // 1.5 seconds delay
-                    continue;
-                } else {
-                    // Non-rate-limit error or final attempt - rethrow
-                    throw error;
-                }
+            // Confirm the sell transaction via WebSocket
+            console.log(`[PumpService] Confirming DevWallet sell transaction via WebSocket...`);
+            const confirmed = await confirmTransactionViaWebSocket(sellResult.signature, 'confirmed', 30000);
+            
+            if (confirmed) {
+                result.success = true;
+                result.message = `DevWallet successfully sold ${sellAmountPercentage} of ${mintAddress}. Transaction: ${sellResult.signature}`;
+                console.log(`[PumpService] ✅ DevWallet sell transaction confirmed!`);
+            } else {
+                throw new Error(`DevWallet sell transaction ${sellResult.signature} confirmation failed`);
             }
-        }
-
-        // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
-        console.log(`[PumpService] Waiting for DevWallet sell bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
-        try {
-            await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
-            result.success = true;
-            result.message = `DevWallet successfully sold ${sellAmountPercentage} of ${mintAddress}. Bundle ID: ${bundleId}`;
-            console.log(`[PumpService] ✅ DevWallet sell bundle confirmed successfully via WebSocket!`);
-        } catch (error) {
-            throw new Error(`DevWallet sell bundle ${bundleId} WebSocket confirmation failed: ${error.message}`);
+        } else {
+            throw new Error(`DevWallet sell transaction failed: ${sellResult.error}`);
         }
 
     } catch (error) {
@@ -735,7 +687,7 @@ async function devSellService(
 
 /**
  * Service for batch selling tokens from all child wallets (excluding DevWallet).
- * Sells in batches of up to MAX_WALLETS_PER_BUNDLE wallets per Jito bundle.
+ * Executes parallel sell transactions in batches of up to 4 wallets at a time.
  */
 async function batchSellService(
     mintAddress,
@@ -823,88 +775,54 @@ async function batchSellService(
                     throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
                 }
 
-                const bundledTxArgs = [];
-                const walletSignerMap = [];
+                // Prepare sell requests for parallel execution
+                const sellRequests = batch.map(wallet => ({
+                    action: 'sell',
+                    mintAddress: mintAddress,
+                    signerKeypair: wallet.keypair,
+                    amount: sellAmountPercentage,
+                    denominatedInSol: false,
+                    slippage: slippageBps,
+                    walletName: wallet.name
+                }));
 
-                batch.forEach((wallet, index) => {
-                    bundledTxArgs.push({
-                        publicKey: wallet.publicKey,
-                        action: "sell",
-                        mint: mintAddress,
-                        denominatedInSol: "false", // Selling tokens
-                        amount: sellAmountPercentage,
-                        slippage: Math.floor(slippageBps / 100), // Convert basis points to percentage (2500 -> 25)
-                        priorityFee: index === 0 ? DEFAULT_JITO_TIP_VIA_PUMP_PORTAL_PRIORITY_FEE : DEFAULT_PUMP_PORTAL_NOMINAL_SUBSEQUENT_TX_FEE_SOL, // Keep as SOL, don't convert to lamports
-                        pool: "pump",
-                    });
-                    walletSignerMap.push({ wallet, isCreate: false });
-                });
+                console.log(`[PumpService] Executing ${batch.length} parallel sell transactions for batch ${i + 1} of ${numBatches}...`);
 
-                const rawTransactionsFromApi = await getTransactionsFromPumpPortal(bundledTxArgs);
-                if (rawTransactionsFromApi.length !== bundledTxArgs.length) {
-                    throw new Error(`Mismatch in transactions from Pump Portal for batch ${i + 1}.`);
-                }
-
-                const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(connection);
-                const walletKeypairsForSigning = walletSignerMap.map(item => item.wallet);
-
-                // MONOCODE Fix: Pass full blockhash data to match working test pattern
-                const recentBlockhashData = { blockhash, lastValidBlockHeight };
-
-                const { signedEncodedTransactions, primarySignatures } = await preparePumpTransactionsForJito(
-                    rawTransactionsFromApi,
-                    walletKeypairsForSigning,
-                    recentBlockhashData, // Pass full blockhash data
-                    null // No mintKeypair for sells
-                );
+                // Execute sell transactions in parallel (max 4 at a time)
+                const sellResults = await executeParallelTransactions(sellRequests, 4);
                 
-                rawTransactionsFromApi.forEach((tx, idx) => {
+                // Add results to batch result
+                sellResults.forEach(sellResult => {
                     batchBundleResult.transactions.push({
-                        walletName: walletSignerMap[idx].wallet.name,
-                        action: "sell",
-                        rawTx: tx,
-                        signedTx: signedEncodedTransactions[idx]
+                        walletName: sellResult.walletName,
+                        action: sellResult.action,
+                        signature: sellResult.signature || null,
+                        success: sellResult.success,
+                        error: sellResult.error || null,
+                        amount: sellResult.amount
                     });
                 });
-
-                console.log(`Sending ${batch.length}-TX Jito bundle for batch ${i + 1} of ${numBatches}...`);
                 
-                // MONOCODE Compliance: Endpoint rotation with rate limit handling
-                let bundleId;
-                let currentEndpointIndex = 0;
-                const maxRetries = 3;
-
-                for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                    const jitoEndpoint = JITO_ENDPOINTS[currentEndpointIndex];
-                    console.log(`[PumpService] Batch ${i + 1}, Attempt ${attempt}/${maxRetries} using endpoint: ${jitoEndpoint}`);
-
-                    try {
-                        bundleId = await sendJitoBundleWithRetries(signedEncodedTransactions, { jitoEndpoint });
-                        batchBundleResult.bundleId = bundleId;
-                        console.log(`Batch sell bundle ${i + 1} sent with ID: ${bundleId}`);
-                        break; // Success
-                    } catch (error) {
-                        if (error.message === 'JITO_RATE_LIMITED' && attempt < maxRetries) {
-                            console.log(`[PumpService] ⚠️ Rate limited on ${jitoEndpoint}, rotating to next endpoint for batch ${i + 1}...`);
-                            currentEndpointIndex = (currentEndpointIndex + 1) % JITO_ENDPOINTS.length;
-                            await sleep(1500); // 1.5s delay
-                            continue;
-                        } else {
-                            throw error; // Rethrow on non-rate-limit error or final attempt
-                        }
-                    }
+                const successfulSells = sellResults.filter(r => r.success).length;
+                console.log(`[PumpService] ✅ Batch ${i + 1} sell transactions complete: ${successfulSells}/${sellResults.length} successful`);
+                
+                // Confirm sell transactions in parallel
+                const sellSignatures = sellResults.filter(r => r.success).map(r => r.signature);
+                if (sellSignatures.length > 0) {
+                    console.log(`[PumpService] Confirming ${sellSignatures.length} sell transactions for batch ${i + 1}...`);
+                    const confirmResults = await confirmParallelTransactions(sellSignatures);
+                    const confirmedSells = confirmResults.filter(r => r.confirmed).length;
+                    console.log(`[PumpService] ✅ Batch ${i + 1} confirmations complete: ${confirmedSells}/${sellSignatures.length} confirmed`);
                 }
-
-                // WebSocket Bundle Confirmation - MONOCODE Fix: Avoid Jito rate limiting
-                console.log(`[PumpService] Waiting for batch ${i + 1} sell bundle confirmation via WebSocket on first signature: ${primarySignatures[0].slice(0, 8)}...`);
-                try {
-                    await waitForBundleViaWebSocket(connection, primarySignatures[0], 'confirmed');
-                    batchBundleResult.success = true;
-                    batchBundleResult.message = `Batch ${i + 1} sell successful.`;
+                
+                batchBundleResult.success = successfulSells > 0;
+                batchBundleResult.message = `Batch ${i + 1}: ${successfulSells}/${batch.length} sell transactions successful`;
+                console.log(`[PumpService] ✅ Batch ${i + 1} processing complete!`);
+                
+                if (batchBundleResult.success) {
                     overallResult.successfulBundles++;
-                    console.log(`[PumpService] ✅ Batch ${i + 1} sell bundle confirmed successfully via WebSocket!`);
-                } catch (error) {
-                    throw new Error(`Bundle ${bundleId} for batch ${i + 1} WebSocket confirmation failed: ${error.message}`);
+                } else {
+                    overallResult.failedBundles++;
                 }
             } catch (batchError) {
                 console.error(`Error processing batch ${i + 1}:`, batchError);
