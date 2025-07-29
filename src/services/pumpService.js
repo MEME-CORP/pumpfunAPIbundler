@@ -18,6 +18,7 @@ const {
     loadKeypairFromFile, 
     loadChildWalletsFromFile, 
     getWalletBalance, 
+    getTokenBalance, // MONOCODE: Add getTokenBalance for SPL token balance validation
     getSolanaConnection,
     WALLETS_DIR,
     MOTHER_WALLET_FILE, // Though likely not used directly here
@@ -332,7 +333,7 @@ async function createAndBuyService(
                 telegram: tokenMetadata.telegram,
                 website: tokenMetadata.website
             },
-            null, // imageUrl - will be handled by createTokenLocalTransaction via Pinata
+            results.metadataUri, // Use the metadata URI from uploadMetadataToPumpPortal
             mintKeypair,
             devWallet.keypair,
             tokenMetadata.createAmountSOL || 0.001,
@@ -632,6 +633,27 @@ async function devSellService(
 
         console.log(`Attempting to sell ${sellAmountPercentage} of ${mintAddress} from DevWallet (${devWallet.publicKey}).`);
 
+        // MONOCODE Fix: Validate SPL token balance before attempting sell
+        console.log(`[PumpService] Checking SPL token balance for ${devWallet.publicKey} and mint ${mintAddress}...`);
+        const tokenBalance = await getTokenBalance(connection, new web3.PublicKey(devWallet.publicKey), new web3.PublicKey(mintAddress));
+        
+        if (tokenBalance === 0) {
+            throw new Error(`DevWallet has no tokens of mint ${mintAddress} to sell. Current balance: ${tokenBalance}`);
+        }
+
+        // Parse percentage and calculate actual sell amount
+        const percentage = parseFloat(sellAmountPercentage.replace('%', ''));
+        if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
+            throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 0 and 100.`);
+        }
+
+        const amountToSell = Math.floor(tokenBalance * (percentage / 100));
+        console.log(`[PumpService] Token balance: ${tokenBalance}, selling ${percentage}% (${amountToSell} tokens)`);
+
+        if (amountToSell === 0) {
+            throw new Error(`Calculated sell amount is zero. Token balance (${tokenBalance}) may be too low for ${percentage}% sell.`);
+        }
+
         // DevWallet is the tipper for this single transaction bundle
         if (!await checkWalletBalancesForTokenOperations([{ ...devWallet, isTipper: true }], { 
             solSpendPerWallet: 0 // Selling tokens doesn't require SOL spend, but may need rent for ATAs
@@ -646,7 +668,7 @@ async function devSellService(
             'sell',
             mintAddress,
             devWallet.keypair,
-            sellAmountPercentage,
+            amountToSell, // Use calculated token amount instead of percentage
             false, // denominatedInSol
             slippageBps
         );
@@ -657,7 +679,7 @@ async function devSellService(
             signature: sellSignature,
             success: true,
             error: null,
-            amount: sellAmountPercentage
+            amount: amountToSell // Log actual token amount sold
         });
 
         console.log(`[PumpService] ✅ DevWallet sell transaction successful: ${sellSignature}`);

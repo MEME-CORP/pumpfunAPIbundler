@@ -270,6 +270,10 @@ The API now supports secure image uploads for token creation using multipart/for
     - DevWallet (tipper): Requires **0.055 SOL** minimum + create amount + buy amount
     - Other wallets: Require **0.025 SOL** minimum + buy amount
     - Example: For 0.001 SOL create + 0.01 SOL buy, DevWallet needs 0.066 SOL total, other wallets need 0.035 SOL total
+    - **IMPORTANT Wallet Naming Convention:**
+    - The creating wallet **MUST** be named `"DevWallet"`.
+    - Initial buying wallets **MUST** be named `"First Bundled Wallet 1"`, `"First Bundled Wallet 2"`, etc., up to a maximum of 4.
+    - The endpoint is hardcoded to use these specific names to orchestrate the creation and initial buy bundle. Failure to adhere to this naming will result in an error.
 
 #### 2. Batch Buy Token
 - **POST** `/api/pump/batch-buy`
