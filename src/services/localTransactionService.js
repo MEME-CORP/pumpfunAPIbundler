@@ -32,61 +32,13 @@ const RETRY_DELAY_MS = 2000;
  * @param {number} slippage - Slippage tolerance in basis points (default 1000 = 10%)
  * @returns {Promise<string>} Transaction signature
  */
-async function createTokenLocalTransaction(tokenMetadata, imageUrl, mintKeypair, signerKeypair, devBuyAmount = 1, slippage = 1000) {
+async function createTokenLocalTransaction(tokenMetadata, metadataUri, mintKeypair, signerKeypair, devBuyAmount = 1, slippage = 1000) {
     console.log(`[LocalTransactionService] Creating token ${tokenMetadata.symbol} with dev buy of ${devBuyAmount} SOL`);
     
     try {
-        // Upload metadata to Pinata IPFS (using working implementation)
-        const pinataJWT = process.env.PINATA_JWT;
-        if (!pinataJWT) {
-            throw new Error('PINATA_JWT environment variable is required for metadata upload');
-        }
-
-        const metadataObject = {
-            name: tokenMetadata.name,
-            symbol: tokenMetadata.symbol,
-            description: tokenMetadata.description,
-            twitter: tokenMetadata.twitter || '',
-            telegram: tokenMetadata.telegram || '',
-            website: tokenMetadata.website || ''
-        };
-        
-        // Add image URL to metadata if provided
-        if (imageUrl) {
-            metadataObject.image = imageUrl;
-        }
-        
-        console.log(`[LocalTransactionService] Uploading metadata to Pinata IPFS...`);
-        
-        const metadataFormData = new FormData();
-        metadataFormData.append('network', 'public');
-        metadataFormData.append('file', JSON.stringify(metadataObject), {
-            filename: 'metadata.json',
-            contentType: 'application/json'
-        });
-        
-        const metadataOptions = {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${pinataJWT}`,
-                ...metadataFormData.getHeaders()
-            },
-            body: metadataFormData
-        };
-        
-        const metadataResponse = await fetch('https://uploads.pinata.cloud/v3/files', metadataOptions);
-        if (!metadataResponse.ok) {
-            const errorText = await metadataResponse.text();
-            throw new Error(`Pinata metadata upload failed: ${metadataResponse.status} ${errorText}`);
-        }
-        
-        const metadataResult = await metadataResponse.json();
-        if (!metadataResult.data || !metadataResult.data.cid) {
-            throw new Error('Pinata metadata upload response missing CID');
-        }
-        
-        const metadataUri = `https://ipfs.io/ipfs/${metadataResult.data.cid}`;
-        console.log(`[LocalTransactionService] Metadata uploaded successfully to Pinata: ${metadataUri}`);
+        // MONOCODE Fix: Use provided metadataUri instead of re-uploading metadata
+        // This preserves the image reference that was uploaded in pumpService.js
+        console.log(`[LocalTransactionService] Using provided metadata URI: ${metadataUri}`);
 
         // Get create transaction from Pump Portal
         const createRequestBody = {
