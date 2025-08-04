@@ -97,9 +97,10 @@ async function createTokenLocalTransaction(tokenMetadata, metadataUri, mintKeypa
  * @param {number} amount - Amount to trade
  * @param {boolean} denominatedInSol - Whether amount is in SOL (true) or tokens (false)
  * @param {number} slippage - Slippage tolerance in basis points
+ * @param {string} pool - Pool to use ("pump", "bonk", etc.)
  * @returns {Promise<string>} Transaction signature
  */
-async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, amount, denominatedInSol = true, slippage = 2500) {
+async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, amount, denominatedInSol = true, slippage = 2500, pool = "pump") {
     console.log(`[LocalTransactionService] Executing ${action} for ${amount} ${denominatedInSol ? 'SOL' : 'tokens'} on ${mintAddress}`);
     
     try {
@@ -111,7 +112,7 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
             amount: amount,
             slippage: slippage / 100, // Convert basis points to percentage
             priorityFee: DEFAULT_PRIORITY_FEE,
-            pool: "pump"
+            pool: pool
         };
 
         const response = await fetch(PUMP_PORTAL_TRADE_LOCAL_ENDPOINT, {
@@ -171,7 +172,8 @@ async function executeParallelTransactions(transactionRequests, batchSize = PARA
                     request.signerKeypair,
                     request.amount,
                     request.denominatedInSol,
-                    request.slippage
+                    request.slippage,
+                    request.pool || "pump"
                 );
                 
                 return {

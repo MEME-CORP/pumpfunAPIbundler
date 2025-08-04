@@ -1,6 +1,7 @@
 const express = require('express');
 const walletController = require('./src/api/walletController');
 const pumpController = require('./src/api/pumpController'); // Require the new controller
+const bonkController = require('./src/api/bonkController'); // Require the Bonk controller
 const uploadMiddleware = require('./src/middleware/uploadMiddleware'); // Upload middleware
 // const pumpController = require('./src/api/pumpController'); // Placeholder
 
@@ -39,6 +40,12 @@ app.post('/api/pump/create-and-buy', uploadMiddleware, pumpController.createAndB
 app.post('/api/pump/batch-buy', pumpController.batchBuy);
 app.post('/api/pump/sell-dev', pumpController.devSell);
 app.post('/api/pump/batch-sell', pumpController.batchSell);
+
+// --- Bonk Pool Trading Routes ---
+app.post('/api/bonk/create-and-buy', uploadMiddleware, bonkController.bonkCreateAndBuy);
+app.post('/api/bonk/batch-buy', bonkController.bonkBatchBuy);
+app.post('/api/bonk/sell-dev', bonkController.bonkDevSell);
+app.post('/api/bonk/batch-sell', bonkController.bonkBatchSell);
 
 app.get('/', (req, res) => {
     res.send('PumpFun API Bundler is running!');

@@ -391,6 +391,138 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
 
 ---
 
+## **Bonk Pool Trading Endpoints**
+
+**Overview:** The Bonk pool endpoints provide the same functionality as Pump endpoints but operate on the Bonk pool. Token creation uses the Lightning API with external IPFS storage, while buy/sell operations use local transactions with `pool: "bonk"` parameter.
+
+**Key Differences from Pump Pool:**
+- **Token Creation**: Uses Lightning API with wallet-specific API key (replaces dev wallet private key)
+- **IPFS Storage**: Uses `nft-storage.letsbonk22.workers.dev` instead of Pinata
+- **API Key Per Wallet**: Each Lightning wallet has its own API key (provided in request, not environment variable)
+- **Buy/Sell Operations**: Same local transaction system but with `pool: "bonk"`
+
+### **Core Bonk Endpoints**
+
+#### 1. Create Bonk Token and Buy
+- **POST** `/api/bonk/create-and-buy`
+- **Content-Type:** `multipart/form-data` (for image upload)
+- **Body:**
+  ```bash
+  curl -X POST http://localhost:3000/api/bonk/create-and-buy \
+    -F "name=My Bonk Token" \
+    -F "symbol=BONK" \
+    -F "description=A great Bonk token" \
+    -F "showName=true" \
+    -F "createAmountSOL=0.5" \
+    -F "slippageBps=2500" \
+    -F "devWalletApiKey=your_lightning_wallet_api_key_here" \
+    -F "buyAmountsSOL={\"devWalletBuySOL\":0.01,\"firstBundledWallet1BuySOL\":0.01}" \
+    -F "wallets=[{\"name\":\"DevWallet\",\"privateKey\":\"base58_private_key_here\"},{\"name\":\"First Bundled Wallet 1\",\"privateKey\":\"base58_private_key_here\"}]" \
+    -F "image=@/path/to/token-image.png"
+  ```
+- **Response:** Mint address, create signature, buy signatures, metadata URI, pool type
+- **Important Notes:**
+  - **Lightning API**: Token creation uses Lightning API with wallet-specific API key
+  - **External IPFS**: Images uploaded to `nft-storage.letsbonk22.workers.dev`
+  - **API Key Per Wallet**: Each Lightning wallet has its own API key (replaces private key for creation)
+  - **Dev Wallet Access**: Uses `devWalletApiKey` parameter (no dev wallet private key needed for creation, unless a buy will be performed from dev wallet, in such case private key is needed)
+  - **Buy Operations**: Use local transactions with `pool: "bonk"` and standard private keys
+  - **Minimum SOL Balance**: Same requirements as Pump pool
+
+#### 2. Bonk Batch Buy
+- **POST** `/api/bonk/batch-buy`
+- **Body:**
+  ```json
+  {
+    "mintAddress": "token_mint_address_here",
+    "solAmountPerWallet": 0.01,
+    "slippageBps": 2500,
+    "targetWalletNames": ["Bundled Wallet 5", "Bundled Wallet 6"],
+    "wallets": [
+      {"name": "Bundled Wallet 5", "privateKey": "base58_private_key_here"},
+      {"name": "Bundled Wallet 6", "privateKey": "base58_private_key_here"}
+    ]
+  }
+  ```
+- **Response:** Signatures, wallets used, total SOL spent, pool type
+- **Important Notes:**
+  - Uses local transactions with `pool: "bonk"`
+  - Excludes DevWallet and First Bundled Wallets 1-4
+  - Parallel execution in batches of 4 transactions
+
+#### 3. Bonk Dev Sell
+- **POST** `/api/bonk/sell-dev`
+- **Body:**
+  ```json
+  {
+    "mintAddress": "token_mint_address_here",
+    "sellAmountPercentage": "50%",
+    "slippageBps": 2500,
+    "wallets": [
+      {"name": "DevWallet", "privateKey": "base58_private_key_here"}
+    ]
+  }
+  ```
+- **Response:** Signature, tokens sold, percentage, dev wallet address, pool type
+- **Important Notes:**
+  - Uses local transactions with `pool: "bonk"`
+  - Only DevWallet can use this endpoint
+  - Calculates sell amount based on current token balance
+
+#### 4. Bonk Batch Sell
+- **POST** `/api/bonk/batch-sell`
+- **Body:**
+  ```json
+  {
+    "mintAddress": "token_mint_address_here",
+    "sellAmountPercentage": "100%",
+    "slippageBps": 2500,
+    "targetWalletNames": ["Bundled Wallet 5"],
+    "wallets": [
+      {"name": "Bundled Wallet 5", "privateKey": "base58_private_key_here"},
+      {"name": "Bundled Wallet 6", "privateKey": "base58_private_key_here"}
+    ]
+  }
+  ```
+- **Response:** Signatures, wallets used, total tokens sold, pool type
+- **Important Notes:**
+  - Uses local transactions with `pool: "bonk"`
+  - Excludes DevWallet (use `/api/bonk/sell-dev` for DevWallet)
+  - Parallel execution in batches of 4 transactions
+
+### **Bonk Pool Setup Requirements**
+
+#### Lightning Wallet Setup
+- **Lightning Wallet Creation**: Create Lightning wallets via create-wallet endpoint (future endpoint)
+- **Wallet Credentials**: Each Lightning wallet provides: public key, private key, and API key
+- **API Key Usage**: API key replaces private key for token creation via Lightning API
+
+#### API Key Authentication
+- **Token Creation**: Uses wallet-specific API key (provided in `devWalletApiKey` parameter)
+- **Dev Wallet**: API key replaces private key for creation operations
+- **Buy/Sell Operations**: Use standard wallet private keys (not API keys)
+
+#### IPFS Storage
+- **Image Upload**: `https://nft-storage.letsbonk22.workers.dev/upload/img`
+- **Metadata Upload**: `https://nft-storage.letsbonk22.workers.dev/upload/meta`
+- **Metadata Structure**: Compatible with Bonk.fun standards
+
+### **Bonk vs Pump Comparison**
+
+| Feature | Pump Pool | Bonk Pool |
+|---------|-----------|----------|
+| Token Creation | Local transactions | Lightning API |
+| IPFS Storage | Pinata | nft-storage.letsbonk22.workers.dev |
+| Dev Wallet Auth | Private key | Wallet-specific API key |
+| API Key Source | Not required | Per-wallet (from Lightning wallet creation) |
+| Buy/Sell Operations | Local transactions | Local transactions |
+| Pool Parameter | `"pump"` | `"bonk"` |
+| Parallel Execution | 4 transactions | 4 transactions |
+| Error Handling | Same | Same |
+| Confirmation | WebSocket | WebSocket |
+
+---
+
 ## General Notes
 
 - All endpoints return JSON.
