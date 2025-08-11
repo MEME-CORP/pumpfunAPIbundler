@@ -31,6 +31,12 @@ app.post('/api/wallets/bundled/import', walletController.importBundledWallets);
 
 app.get('/api/wallets/:publicKey/balance', walletController.getWalletBalance);
 
+// Enhanced balance endpoints (API.MD §6)
+app.get('/api/wallets/:publicKey/balance/sol', walletController.getWalletBalanceSOL);
+app.get('/api/wallets/:publicKey/balance/token/:mintAddress', walletController.getTokenBalance);
+app.get('/api/wallets/:publicKey/balance/all', walletController.getWalletBalanceAll);
+app.get('/api/wallets/:publicKey/balance/tokens', walletController.getAllTokenBalances);
+
 // --- Funding Routes ---
 app.post('/api/wallets/fund-bundled', walletController.fundBundledWallets);
 app.post('/api/wallets/return-funds', walletController.returnFundsToMother);
