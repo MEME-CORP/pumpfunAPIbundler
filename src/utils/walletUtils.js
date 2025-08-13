@@ -233,10 +233,17 @@ async function getTokenBalance(connection, walletPublicKey, mintPublicKey) {
 // Solana connection configuration - this should be configurable for the API
 // For now, keeping it simple.
 let solanaConnection;
-function getSolanaConnection(rpcUrl = web3.clusterApiUrl('mainnet-beta'), commitment = 'confirmed') {
-    if (!solanaConnection || solanaConnection.rpcEndpoint !== rpcUrl) {
-        console.log(`Initializing Solana connection to: ${rpcUrl} with commitment: ${commitment}`);
-        solanaConnection = new web3.Connection(rpcUrl, commitment);
+function getSolanaConnection(rpcUrl, commitment = 'confirmed') {
+    // Prefer explicit arg, then env var, then mainnet-beta default
+    const envRpcUrl = process.env.SOLANA_RPC_URL;
+    const effectiveRpcUrl = rpcUrl || envRpcUrl || web3.clusterApiUrl('mainnet-beta');
+
+    // Allow overriding commitment via env while preserving explicit arg precedence
+    const effectiveCommitment = commitment || process.env.SOLANA_COMMITMENT || 'confirmed';
+
+    if (!solanaConnection || solanaConnection.rpcEndpoint !== effectiveRpcUrl) {
+        console.log(`Initializing Solana connection to: ${effectiveRpcUrl} with commitment: ${effectiveCommitment}`);
+        solanaConnection = new web3.Connection(effectiveRpcUrl, effectiveCommitment);
     }
     return solanaConnection;
 }
