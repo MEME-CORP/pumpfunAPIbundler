@@ -791,12 +791,15 @@ async function batchSellService(
         }
 
         console.log(`Attempting batch sell for ${mintAddress} with ${eligibleWallets.length} eligible wallets.`);
-
-        // Format sellAmountPercentage to ensure it has a % symbol if it's a string
-        if (typeof sellAmountPercentage === 'string' && !sellAmountPercentage.endsWith('%')) {
-            sellAmountPercentage = `${sellAmountPercentage}%`;
-        } else if (typeof sellAmountPercentage === 'number') {
-            sellAmountPercentage = `${sellAmountPercentage}%`;
+        
+        // Parse and validate sell percentage once
+        const percentageNum = parseFloat(
+            typeof sellAmountPercentage === 'string' 
+                ? sellAmountPercentage.replace('%', '') 
+                : String(sellAmountPercentage)
+        );
+        if (!Number.isFinite(percentageNum) || percentageNum <= 0 || percentageNum > 100) {
+            throw new Error(`Invalid sellAmountPercentage: ${sellAmountPercentage}`);
         }
 
         const numBatches = Math.ceil(eligibleWallets.length / MAX_WALLETS_PER_BUNDLE);
@@ -824,18 +827,42 @@ async function batchSellService(
                     throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
                 }
 
-                // Prepare sell requests for parallel execution
-                const sellRequests = batch.map(wallet => ({
-                    action: 'sell',
-                    mintAddress: mintAddress,
-                    signerKeypair: wallet.keypair,
-                    amount: sellAmountPercentage,
-                    denominatedInSol: false,
-                    slippage: slippageBps,
-                    walletName: wallet.name
-                }));
+                // Prepare sell requests for parallel execution using per-wallet token amounts
+                const sellRequests = [];
+                const mintPk = new web3.PublicKey(mintAddress);
+                for (const wallet of batch) {
+                    try {
+                        const walletPk = new web3.PublicKey(wallet.publicKey);
+                        const tokenBalance = await getTokenBalance(connection, walletPk, mintPk);
+                        if (!tokenBalance || tokenBalance <= 0) {
+                            console.log(`[PumpService] Skipping ${wallet.name}: no tokens to sell.`);
+                            continue;
+                        }
+                        const amountToSell = Math.floor(tokenBalance * (percentageNum / 100));
+                        if (!amountToSell || amountToSell <= 0) {
+                            console.log(`[PumpService] Skipping ${wallet.name}: calculated sell amount is 0 (balance=${tokenBalance}, percentage=${percentageNum}%).`);
+                            continue;
+                        }
+                        sellRequests.push({
+                            action: 'sell',
+                            mintAddress: mintAddress,
+                            signerKeypair: wallet.keypair,
+                            amount: amountToSell,
+                            denominatedInSol: false,
+                            slippage: slippageBps,
+                            walletName: wallet.name
+                        });
+                    } catch (balanceError) {
+                        console.warn(`[PumpService] Could not prepare sell for ${wallet.name}: ${balanceError.message}`);
+                    }
+                }
 
-                console.log(`[PumpService] Executing ${batch.length} parallel sell transactions for batch ${i + 1} of ${numBatches}...`);
+                if (sellRequests.length === 0) {
+                    console.log(`[PumpService] No sellable wallets in batch ${i + 1}/${numBatches}. Skipping.`);
+                    continue;
+                }
+
+                console.log(`[PumpService] Executing ${sellRequests.length} parallel sell transactions for batch ${i + 1} of ${numBatches}...`);
 
                 // Execute sell transactions in parallel (max 4 at a time)
                 const sellResults = await executeParallelTransactions(sellRequests, 4);
