@@ -118,11 +118,11 @@ function sleep(ms) {
 /**
  * Adds priority fee instructions to a transaction.
  * @param {web3.Transaction} transaction - The transaction to add priority fees to.
- * @param {number} [priorityFeeMicrolamports=400000] - Priority fee in microlamports.
- * @param {number} [computeUnitLimit=600000] - Compute unit limit.
+ * @param {number} [priorityFeeMicrolamports=200000] - Priority fee in microlamports.
+ * @param {number} [computeUnitLimit=300000] - Compute unit limit.
  * @returns {web3.Transaction} The transaction with priority fee instructions added.
  */
-function addPriorityFeeInstructions(transaction, priorityFeeMicrolamports = 400000, computeUnitLimit = 600000) {
+function addPriorityFeeInstructions(transaction, priorityFeeMicrolamports = 200000, computeUnitLimit = 300000) {
     console.log(`[TransactionUtils] Adding priority fee: ${priorityFeeMicrolamports} microlamports, CU limit: ${computeUnitLimit}`);
 
     // Add compute unit limit instruction
@@ -319,7 +319,7 @@ async function checkTransactionStatus(connection, signature) {
  * @param {number} computeUnitLimit - Compute unit limit
  * @returns {number} Estimated total fee in lamports
  */
-function calculateTransactionFee(priorityFeeMicrolamports = 400000, computeUnitLimit = 600000) {
+function calculateTransactionFee(priorityFeeMicrolamports = 200000, computeUnitLimit = 300000) {
     const baseFee = 5000; // Base transaction fee in lamports
     const priorityFeeInLamports = Math.ceil((priorityFeeMicrolamports * computeUnitLimit) / 1000000);
     const totalFee = baseFee + priorityFeeInLamports;
@@ -395,16 +395,16 @@ function getRentExemptionForAccountType(accountType) {
  * Calculates total cost for operations that may create accounts
  * MONOCODE Compliance: Progressive construction with comprehensive cost calculation
  * @param {Object} options - Configuration object
- * @param {number} [options.priorityFeeMicrolamports=400000] - Priority fee in microlamports
- * @param {number} [options.computeUnitLimit=600000] - Compute unit limit
+ * @param {number} [options.priorityFeeMicrolamports=200000] - Priority fee in microlamports
+ * @param {number} [options.computeUnitLimit=300000] - Compute unit limit
  * @param {string[]} [options.accountTypesToCreate=[]] - Types of accounts that will be created
  * @param {boolean} [options.includeRentBuffer=true] - Whether to include a safety buffer for rent
  * @returns {Object} Cost breakdown with transaction fees and rent requirements
  */
 function calculateTransactionCostWithRent(options = {}) {
     const {
-        priorityFeeMicrolamports = 400000,
-        computeUnitLimit = 600000,
+        priorityFeeMicrolamports = 200000,
+        computeUnitLimit = 300000,
         accountTypesToCreate = [],
         includeRentBuffer = true
     } = options;
@@ -501,8 +501,8 @@ function validateBalanceForRentOperations(accountBalanceSOL, costCalculation, ad
  * @param {boolean} [options.skipPreflight=false] - Whether to skip preflight simulation.
  * @param {number} [options.maxRetries=3] - Maximum retries for sending/confirming.
  * @param {web3.Commitment} [options.commitment='confirmed'] - Desired commitment level.
- * @param {number} [options.priorityFeeMicrolamports=400000] - Priority fee in microlamports.
- * @param {number} [options.computeUnitLimit=600000] - Compute unit limit.
+ * @param {number} [options.priorityFeeMicrolamports=200000] - Priority fee in microlamports.
+ * @param {number} [options.computeUnitLimit=300000] - Compute unit limit.
  * @returns {Promise<string>} The transaction signature.
  */
 async function sendAndConfirmTransactionRobustly(connection, transaction, signers, options = {}) {
@@ -510,8 +510,8 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
         skipPreflight = true,
         maxRetries = 3,
         commitment = 'confirmed',
-        priorityFeeMicrolamports = 400000,
-        computeUnitLimit = 600000
+        priorityFeeMicrolamports = 200000,
+        computeUnitLimit = 300000
     } = options;
 
     console.log(`[TransactionUtils] Starting ADVANCED transaction strategy with ${maxRetries} max retries`);
@@ -760,11 +760,11 @@ async function getDynamicPriorityFee(connection, accounts = []) {
  * Note: VersionedTransaction objects don't support manual priority fee modification
  * as they are pre-optimized and handle priority fees internally.
  * @param {web3.VersionedTransaction} transaction - The VersionedTransaction to check.
- * @param {number} [priorityFeeMicrolamports=400000] - Priority fee in microlamports (ignored for VersionedTransaction).
- * @param {number} [computeUnitLimit=600000] - Compute unit limit (ignored for VersionedTransaction).
+ * @param {number} [priorityFeeMicrolamports=200000] - Priority fee in microlamports (ignored for VersionedTransaction).
+ * @param {number} [computeUnitLimit=300000] - Compute unit limit (ignored for VersionedTransaction).
  * @returns {web3.VersionedTransaction} The transaction (unchanged for VersionedTransaction).
  */
-function addPriorityFeeInstructionsVersioned(transaction, priorityFeeMicrolamports = 400000, computeUnitLimit = 600000) {
+function addPriorityFeeInstructionsVersioned(transaction, priorityFeeMicrolamports = 200000, computeUnitLimit = 300000) {
     if (transaction instanceof web3.VersionedTransaction) {
         console.log(`[TransactionUtils] VersionedTransaction detected - priority fees handled internally by Jupiter`);
         return transaction; // Return as-is, Jupiter handles priority fees internally
