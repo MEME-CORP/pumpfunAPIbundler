@@ -468,6 +468,7 @@ async function batchBuyService(
         totalBundlesSent: 0,
         successfulBundles: 0,
         failedBundles: 0,
+        skippedBundles: 0,
         bundleResults: [] // Array of { bundleId, success, message, transactions: [] }
     };
 
@@ -524,6 +525,7 @@ async function batchBuyService(
                 bundleId: null,
                 success: false,
                 message: '',
+                skipped: false,
                 transactions: []
             };
 
@@ -857,8 +859,9 @@ async function batchSellService(
                 if (sellRequests.length === 0) {
                     console.warn(`[PumpService] No wallets with non-zero sell amount in batch ${i + 1}. Skipped ${skippedZero} wallet(s).`);
                     batchBundleResult.success = false;
-                    batchBundleResult.message = `Batch ${i + 1}: no wallets with non-zero sell amount (skipped ${skippedZero})`;
-                    overallResult.failedBundles++;
+                    batchBundleResult.skipped = true;
+                    batchBundleResult.message = `Batch ${i + 1}: skipped (no wallets with non-zero sell amount; skipped ${skippedZero})`;
+                    overallResult.skippedBundles++;
                 } else {
                     console.log(`[PumpService] Executing ${sellRequests.length} parallel sell transactions for batch ${i + 1} of ${numBatches}...`);
 
@@ -910,13 +913,16 @@ async function batchSellService(
             if (i < numBatches - 1) await sleep(2000); // Delay between sending bundles
         }
 
-        overallResult.success = overallResult.failedBundles === 0 && overallResult.totalBundlesSent > 0;
+        const executedBundles = overallResult.totalBundlesSent - overallResult.skippedBundles;
+        overallResult.success = overallResult.failedBundles === 0; // Treat all-skipped as success (no failures)
         if (overallResult.success) {
-            overallResult.message = `All ${overallResult.successfulBundles} batch sell bundles confirmed successfully.`;
-        } else if (overallResult.totalBundlesSent > 0) {
-            overallResult.message = `Batch sell process completed with ${overallResult.successfulBundles} successful and ${overallResult.failedBundles} failed bundles out of ${overallResult.totalBundlesSent}.`;
+            if (executedBundles === 0) {
+                overallResult.message = `Batch sell process completed: 0 executed (all ${overallResult.skippedBundles} batches skipped).`;
+            } else {
+                overallResult.message = `Batch sell process completed successfully: ${overallResult.successfulBundles} successful, 0 failed, ${overallResult.skippedBundles} skipped out of ${overallResult.totalBundlesSent}.`;
+            }
         } else {
-            overallResult.message = "No batches were processed.";
+            overallResult.message = `Batch sell process completed with ${overallResult.successfulBundles} successful, ${overallResult.failedBundles} failed, ${overallResult.skippedBundles} skipped out of ${overallResult.totalBundlesSent}.`;
         }
 
     } catch (error) {
