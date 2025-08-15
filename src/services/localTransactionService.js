@@ -104,6 +104,17 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
     console.log(`[LocalTransactionService] Executing ${action} for ${amount} ${denominatedInSol ? 'SOL' : 'tokens'} on ${mintAddress}`);
     
     try {
+        // Guard against invalid sell amounts to prevent zero-amount attempts and redundant retries
+        if (action === 'sell') {
+            const amt = Number(amount);
+            if (!Number.isFinite(amt) || amt <= 0) {
+                throw new Error(`Invalid sell amount: ${amount}. Must be > 0 tokens.`);
+            }
+            if (denominatedInSol === true) {
+                console.warn(`[LocalTransactionService] Warning: 'sell' with denominatedInSol=true; expected false (token amount).`);
+            }
+        }
+
         const requestBody = {
             publicKey: signerKeypair.publicKey.toBase58(),
             action: action,

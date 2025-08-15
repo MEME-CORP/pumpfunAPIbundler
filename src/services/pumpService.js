@@ -824,54 +824,80 @@ async function batchSellService(
                     throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
                 }
 
-                // Prepare sell requests for parallel execution
-                const sellRequests = batch.map(wallet => ({
-                    action: 'sell',
-                    mintAddress: mintAddress,
-                    signerKeypair: wallet.keypair,
-                    amount: sellAmountPercentage,
-                    denominatedInSol: false,
-                    slippage: slippageBps,
-                    walletName: wallet.name
-                }));
-
-                console.log(`[PumpService] Executing ${batch.length} parallel sell transactions for batch ${i + 1} of ${numBatches}...`);
-
-                // Execute sell transactions in parallel (max 4 at a time)
-                const sellResults = await executeParallelTransactions(sellRequests, 4);
-                
-                // Add results to batch result
-                sellResults.forEach(sellResult => {
-                    batchBundleResult.transactions.push({
-                        walletName: sellResult.walletName,
-                        action: sellResult.action,
-                        signature: sellResult.signature || null,
-                        success: sellResult.success,
-                        error: sellResult.error || null,
-                        amount: sellResult.amount
-                    });
-                });
-                
-                const successfulSells = sellResults.filter(r => r.success).length;
-                console.log(`[PumpService] ✅ Batch ${i + 1} sell transactions complete: ${successfulSells}/${sellResults.length} successful`);
-                
-                // Confirm sell transactions in parallel
-                const sellSignatures = sellResults.filter(r => r.success).map(r => r.signature);
-                if (sellSignatures.length > 0) {
-                    console.log(`[PumpService] Confirming ${sellSignatures.length} sell transactions for batch ${i + 1}...`);
-                    const confirmResults = await confirmParallelTransactions(sellSignatures);
-                    const confirmedSells = confirmResults.filter(r => r.confirmed).length;
-                    console.log(`[PumpService] ✅ Batch ${i + 1} confirmations complete: ${confirmedSells}/${sellSignatures.length} confirmed`);
+                // Prepare sell requests with per-wallet token balance check to avoid zero-amount sells
+                const percentage = parseFloat(String(sellAmountPercentage).replace('%', ''));
+                if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
+                    throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 0 and 100.`);
                 }
-                
-                batchBundleResult.success = successfulSells > 0;
-                batchBundleResult.message = `Batch ${i + 1}: ${successfulSells}/${batch.length} sell transactions successful`;
-                console.log(`[PumpService] ✅ Batch ${i + 1} processing complete!`);
-                
-                if (batchBundleResult.success) {
-                    overallResult.successfulBundles++;
-                } else {
+                const mintPk = new web3.PublicKey(mintAddress);
+                const tokenBalances = await Promise.all(
+                    batch.map(w => getTokenBalance(connection, new web3.PublicKey(w.publicKey), mintPk))
+                );
+                let skippedZero = 0;
+                const sellRequests = [];
+                batch.forEach((wallet, idx) => {
+                    const balance = tokenBalances[idx] || 0;
+                    const amountToSell = Math.floor(balance * (percentage / 100));
+                    if (amountToSell > 0) {
+                        sellRequests.push({
+                            action: 'sell',
+                            mintAddress: mintAddress,
+                            signerKeypair: wallet.keypair,
+                            amount: amountToSell,
+                            denominatedInSol: false,
+                            slippage: slippageBps,
+                            walletName: wallet.name
+                        });
+                    } else {
+                        skippedZero++;
+                        console.log(`[PumpService] Skipping wallet ${wallet.name} (${wallet.publicKey}) - token balance ${balance} -> ${percentage}% results in 0 tokens to sell`);
+                    }
+                });
+
+                if (sellRequests.length === 0) {
+                    console.warn(`[PumpService] No wallets with non-zero sell amount in batch ${i + 1}. Skipped ${skippedZero} wallet(s).`);
+                    batchBundleResult.success = false;
+                    batchBundleResult.message = `Batch ${i + 1}: no wallets with non-zero sell amount (skipped ${skippedZero})`;
                     overallResult.failedBundles++;
+                } else {
+                    console.log(`[PumpService] Executing ${sellRequests.length} parallel sell transactions for batch ${i + 1} of ${numBatches}...`);
+
+                    // Execute sell transactions in parallel (max 4 at a time)
+                    const sellResults = await executeParallelTransactions(sellRequests, 4);
+                    
+                    // Add results to batch result
+                    sellResults.forEach(sellResult => {
+                        batchBundleResult.transactions.push({
+                            walletName: sellResult.walletName,
+                            action: sellResult.action,
+                            signature: sellResult.signature || null,
+                            success: sellResult.success,
+                            error: sellResult.error || null,
+                            amount: sellResult.amount
+                        });
+                    });
+                    
+                    const successfulSells = sellResults.filter(r => r.success).length;
+                    console.log(`[PumpService] ✅ Batch ${i + 1} sell transactions complete: ${successfulSells}/${sellResults.length} successful`);
+                    
+                    // Confirm sell transactions in parallel
+                    const sellSignatures = sellResults.filter(r => r.success).map(r => r.signature);
+                    if (sellSignatures.length > 0) {
+                        console.log(`[PumpService] Confirming ${sellSignatures.length} sell transactions for batch ${i + 1}...`);
+                        const confirmResults = await confirmParallelTransactions(sellSignatures);
+                        const confirmedSells = confirmResults.filter(r => r.confirmed).length;
+                        console.log(`[PumpService] ✅ Batch ${i + 1} confirmations complete: ${confirmedSells}/${sellSignatures.length} confirmed`);
+                    }
+                    
+                    batchBundleResult.success = successfulSells > 0;
+                    batchBundleResult.message = `Batch ${i + 1}: ${successfulSells}/${sellRequests.length} sell transactions successful`;
+                    console.log(`[PumpService] ✅ Batch ${i + 1} processing complete!`);
+                    
+                    if (batchBundleResult.success) {
+                        overallResult.successfulBundles++;
+                    } else {
+                        overallResult.failedBundles++;
+                    }
                 }
             } catch (batchError) {
                 console.error(`Error processing batch ${i + 1}:`, batchError);
