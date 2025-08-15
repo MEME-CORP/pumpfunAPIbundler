@@ -223,8 +223,8 @@ async function fundChildWalletsService(amountPerWalletSOL, childWallets, motherW
     // MONOCODE Compliance: Enhanced fee calculation including rent exemption requirements
     // Calculate costs for transfer transactions, accounting for future token operations
     const costPerTransaction = calculateTransactionCostWithRent({
-        priorityFeeMicrolamports: 100000,
-        computeUnitLimit: 200000,
+        priorityFeeMicrolamports: 400000,
+        computeUnitLimit: 600000,
         accountTypesToCreate: ['token'], // Account for potential future token account creation
         includeRentBuffer: true // Include rent exemption requirements
     });
@@ -252,8 +252,8 @@ async function fundChildWalletsService(amountPerWalletSOL, childWallets, motherW
         try {
             const signature = await sendAndConfirmTransactionRobustly(connection, transaction, [motherWallet], { 
                 skipPreflight: true,
-                priorityFeeMicrolamports: 100000,
-                computeUnitLimit: 200000,
+                priorityFeeMicrolamports: 400000,
+                computeUnitLimit: 600000,
                 commitment: 'confirmed'
             });
             const balanceAfter = await getWalletBalance(connection, new web3.PublicKey(child.publicKey));
@@ -341,8 +341,8 @@ async function returnFundsToMotherWalletService(childWallets, motherWalletPublic
             // MONOCODE Compliance: Calculate accurate transaction fees INCLUDING rent exemption requirements
             // For return funds, we need to account for future token operations that may require rent exemption
             const costCalculation = calculateTransactionCostWithRent({
-                priorityFeeMicrolamports: 100000,
-                computeUnitLimit: 200000,
+                priorityFeeMicrolamports: 400000,
+                computeUnitLimit: 600000,
                 accountTypesToCreate: ['token'], // Account for potential future token account creation
                 includeRentBuffer: true // Include rent exemption requirements
             });
@@ -378,8 +378,8 @@ async function returnFundsToMotherWalletService(childWallets, motherWalletPublic
             );
             signature = await sendAndConfirmTransactionRobustly(connection, transaction, [childKeypair], { 
                 skipPreflight: true,
-                priorityFeeMicrolamports: 100000,
-                computeUnitLimit: 200000,
+                priorityFeeMicrolamports: 400000,
+                computeUnitLimit: 600000,
                 commitment: 'confirmed'
             });
             status = 'success';
@@ -757,7 +757,7 @@ async function validateWalletsForTokenOperations(wallets, options = {}) {
             
             const costCalculation = calculateTransactionCostWithRent({
                 priorityFeeMicrolamports: priorityFee,
-                computeUnitLimit: 200000,
+                computeUnitLimit: 600000,
                 accountTypesToCreate: accountTypesToCreate,
                 includeRentBuffer: true
             });
