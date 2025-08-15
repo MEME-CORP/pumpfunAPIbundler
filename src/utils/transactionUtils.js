@@ -518,8 +518,7 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
     console.log(`[TransactionUtils] RPC Config: ${currentRpcConfig.name} - ${currentRpcConfig.description}`);
     console.log(`[TransactionUtils] Configuration: skipPreflight=${skipPreflight}, commitment=${commitment}`);
 
-    // Add priority fee instructions
-    addPriorityFeeInstructions(transaction, priorityFeeMicrolamports, computeUnitLimit);
+    // Compute budget instructions will be applied per-attempt with dynamic compute unit tuning
 
     let retries = 0;
     let lastSignature = null;
@@ -550,6 +549,17 @@ async function sendAndConfirmTransactionRobustly(connection, transaction, signer
             transaction.feePayer = signers[0].publicKey;
 
             console.log(`[TransactionUtils] Fresh blockhash: ${latestBlockhash.blockhash.slice(0, 8)}... Valid until: ${latestBlockhash.lastValidBlockHeight}`);
+
+            // Apply dynamic compute unit limit per attempt (+10% each retry)
+            const attemptFactor = Math.pow(1.1, retries);
+            const adjustedComputeUnitLimit = Math.floor(computeUnitLimit * attemptFactor);
+
+            // Remove any existing compute budget instructions from previous attempts
+            transaction.instructions = transaction.instructions.filter(ix => !ix.programId.equals(web3.ComputeBudgetProgram.programId));
+
+            // Re-apply compute budget with adjusted limit, keeping priority fee the same
+            addPriorityFeeInstructions(transaction, priorityFeeMicrolamports, adjustedComputeUnitLimit);
+            console.log(`[TransactionUtils] Retry tuning: compute unit limit adjusted to ${adjustedComputeUnitLimit} (base ${computeUnitLimit}, factor ${attemptFactor.toFixed(2)})`);
 
             // Sign transaction
             transaction.sign(...signers);
