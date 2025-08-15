@@ -13,7 +13,7 @@ const bs58 = require('bs58');
 const fetch = require('node-fetch');
 const FormData = require('form-data'); // MONOCODE Fix: Use form-data package for proper multipart headers with node-fetch v2
 const { getSolanaConnection } = require('../utils/walletUtils');
-const { sleep, confirmTransactionAdvanced } = require('../utils/transactionUtils');
+const { sleep, confirmTransactionAdvanced, rateLimitedRpcCall } = require('../utils/transactionUtils');
 
 // Constants for local transactions
 const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = 'https://pumpportal.fun/api/trade-local';
@@ -78,7 +78,9 @@ async function createTokenLocalTransaction(tokenMetadata, metadataUri, mintKeypa
 
         // Send the transaction
         const connection = getSolanaConnection();
-        const signature = await connection.sendTransaction(transaction);
+        const signature = await rateLimitedRpcCall(async () => {
+            return await connection.sendTransaction(transaction);
+        });
         console.log(`[LocalTransactionService] ✅ Token creation transaction sent: ${signature}`);
 
         return signature;
@@ -146,7 +148,9 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
 
         // Send the transaction
         const connection = getSolanaConnection();
-        const signature = await connection.sendTransaction(transaction);
+        const signature = await rateLimitedRpcCall(async () => {
+            return await connection.sendTransaction(transaction);
+        });
         console.log(`[LocalTransactionService] ✅ ${action} transaction sent: ${signature}`);
 
         return signature;
@@ -284,7 +288,9 @@ async function confirmTransactionViaWebSocket(signature, commitment = 'confirmed
                 console.log(`[LocalTransactionService] WebSocket timeout reached for ${signature.slice(0, 8)}, doing final RPC check...`);
 
                 try {
-                    const statusResult = await connection.getSignatureStatus(signature);
+                    const statusResult = await rateLimitedRpcCall(async () => {
+                        return await connection.getSignatureStatus(signature);
+                    });
 
                     if (statusResult && statusResult.value) {
                         const status = statusResult.value;

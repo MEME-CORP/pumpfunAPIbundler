@@ -3,6 +3,7 @@ const path = require('path');
 const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
 const { getAssociatedTokenAddress } = require('@solana/spl-token'); // MONOCODE: Add for getTokenBalance
+const { rateLimitedRpcCall } = require('./transactionUtils');
 
 // Configuration for wallet storage - API services will use this.
 // For now, defaults to a 'data/wallets' directory in the project root.
@@ -194,7 +195,9 @@ async function saveChildWalletsToFile(childWalletsWithNames, fileName) {
  */
 async function getWalletBalance(connection, publicKey) {
     try {
-        const lamports = await connection.getBalance(publicKey);
+        const lamports = await rateLimitedRpcCall(async () => {
+            return await connection.getBalance(publicKey);
+        });
         return lamports / web3.LAMPORTS_PER_SOL;
     } catch (error) {
         console.error(`Error getting balance for ${publicKey.toBase58()}:`, error);
@@ -218,7 +221,9 @@ async function getTokenBalance(connection, walletPublicKey, mintPublicKey) {
             true // allowOwnerOffCurve - set to true for associated token accounts
         );
 
-        const balance = await connection.getTokenAccountBalance(tokenAccount);
+        const balance = await rateLimitedRpcCall(async () => {
+            return await connection.getTokenAccountBalance(tokenAccount);
+        });
         return balance.value.uiAmount || 0;
     } catch (error) {
         if (error.message.includes('could not find account')) {

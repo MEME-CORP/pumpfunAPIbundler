@@ -1,7 +1,6 @@
 const web3 = require('@solana/web3.js');
 
 const bs58 = require('bs58');
-const { getSolanaConnection } = require('./walletUtils');
 
 /**
  * RPC Provider Configuration for optimal settings
