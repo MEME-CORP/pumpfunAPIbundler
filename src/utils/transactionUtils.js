@@ -7,16 +7,17 @@ const bs58 = require('bs58');
  * These settings are optimized for each provider type
  */
 const RPC_CONFIGS = {
-    // Public mainnet-beta (free tier) - VERY strict rate limiting required
+    // Public mainnet-beta (free tier) - Optimized for official limits
     // Official limits: 100 req/10s total, 40 req/10s per method, 40 concurrent connections
+    // Per method limit: 40 req/10s = 4 RPS = 250ms minimum interval per method
     PUBLIC: {
         name: 'Public Mainnet-Beta',
-        rpcCallInterval: 1000, // 1000ms between calls (conservative for 100 req/10s = max 10 req/s)
-        maxConcurrentRequests: 2, // Very low concurrent requests (limit is 40)
-        retryBackoff: 15000, // 15s backoff for 429 errors (much longer)
-        confirmationTimeout: 25000, // 25s confirmation timeout (longer for rate-limited environment)
-        useWebSocket: true, // Always use WebSocket to avoid polling
-        description: 'Free public RPC with VERY strict rate limits - 100 req/10s total'
+        rpcCallInterval: 2500, // 2500ms between calls (4 req/10s = safe margin under 40 req/10s per method)
+        maxConcurrentRequests: 1, // Single concurrent request to avoid method-specific bursts
+        retryBackoff: 3000, // 3s initial backoff for 429 errors (reduced from 15s)
+        confirmationTimeout: 20000, // 20s confirmation timeout
+        useWebSocket: true, // Always use WebSocket to avoid polling overhead
+        description: 'Free public RPC optimized for 40 req/10s per method limit'
     },
 
     // Premium providers (QuickNode, Helius, Alchemy) - relaxed settings
