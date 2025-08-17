@@ -834,11 +834,12 @@ async function batchSellService(
                 if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
                     throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 0 and 100.`);
                 }
-                // MONOCODE Fix: Use rate-limited token balance checks to avoid 429 errors
-                const tokenBalanceInfos = await Promise.all(
-                    batch.map(w => getTokenBalance(w.publicKey, mintAddress, connection))
-                );
-                const tokenBalances = tokenBalanceInfos.map(info => info.balance);
+                // MONOCODE Fix: Sequential balance checks to prevent RPC burst overload
+                const tokenBalances = [];
+                for (const wallet of batch) {
+                    const tokenBalanceInfo = await getTokenBalance(wallet.publicKey, mintAddress, connection);
+                    tokenBalances.push(tokenBalanceInfo.balance);
+                }
                 let skippedZero = 0;
                 const sellRequests = [];
                 batch.forEach((wallet, idx) => {
