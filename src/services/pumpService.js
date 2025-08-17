@@ -15,15 +15,17 @@ const fs = require('fs').promises; // Still needed for LATEST_MINT_FILE operatio
 const path = require('path'); // Still needed for LATEST_MINT_FILE path
 const { Keypair, SystemProgram, LAMPORTS_PER_SOL } = web3;
 const { 
+    saveKeypairToFile, 
     loadKeypairFromFile, 
     loadChildWalletsFromFile, 
     getWalletBalance, 
-    getTokenBalance, // MONOCODE: Add getTokenBalance for SPL token balance validation
     getSolanaConnection,
     WALLETS_DIR,
     MOTHER_WALLET_FILE, // Though likely not used directly here
-    CHILD_WALLETS_FILE
+    CHILD_WALLETS_FILE,
 } = require('../utils/walletUtils');
+// MONOCODE Fix: Use rate-limited token balance function instead of direct RPC calls
+const { getTokenBalance } = require('../utils/solanaUtils');
 const { validateWalletsForTokenOperations } = require('./walletService');
 const { 
     uploadMetadataToPumpPortal, 
@@ -665,9 +667,10 @@ async function devSellService(
 
         console.log(`Attempting to sell ${sellAmountPercentage} of ${mintAddress} from DevWallet (${devWallet.publicKey}).`);
 
-        // MONOCODE Fix: Validate SPL token balance before attempting sell
+        // MONOCODE Fix: Validate SPL token balance before attempting sell using rate-limited RPC
         console.log(`[PumpService] Checking SPL token balance for ${devWallet.publicKey} and mint ${mintAddress}...`);
-        const tokenBalance = await getTokenBalance(connection, new web3.PublicKey(devWallet.publicKey), new web3.PublicKey(mintAddress));
+        const tokenBalanceInfo = await getTokenBalance(devWallet.publicKey, mintAddress, connection);
+        const tokenBalance = tokenBalanceInfo.balance;
         
         if (tokenBalance === 0) {
             throw new Error(`DevWallet has no tokens of mint ${mintAddress} to sell. Current balance: ${tokenBalance}`);
@@ -831,10 +834,11 @@ async function batchSellService(
                 if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
                     throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 0 and 100.`);
                 }
-                const mintPk = new web3.PublicKey(mintAddress);
-                const tokenBalances = await Promise.all(
-                    batch.map(w => getTokenBalance(connection, new web3.PublicKey(w.publicKey), mintPk))
+                // MONOCODE Fix: Use rate-limited token balance checks to avoid 429 errors
+                const tokenBalanceInfos = await Promise.all(
+                    batch.map(w => getTokenBalance(w.publicKey, mintAddress, connection))
                 );
+                const tokenBalances = tokenBalanceInfos.map(info => info.balance);
                 let skippedZero = 0;
                 const sellRequests = [];
                 batch.forEach((wallet, idx) => {

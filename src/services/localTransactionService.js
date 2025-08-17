@@ -13,7 +13,7 @@ const bs58 = require('bs58');
 const fetch = require('node-fetch');
 const FormData = require('form-data'); // MONOCODE Fix: Use form-data package for proper multipart headers with node-fetch v2
 const { getSolanaConnection } = require('../utils/walletUtils');
-const { rateLimitedRpcCall, jitteredSleep, batchGetSignatureStatuses } = require('../utils/transactionUtils');
+const { sleep, confirmTransactionAdvanced, rateLimitedRpcCall } = require('../utils/transactionUtils');
 
 // Constants for local transactions
 const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = 'https://pumpportal.fun/api/trade-local';
@@ -78,13 +78,8 @@ async function createTokenLocalTransaction(tokenMetadata, metadataUri, mintKeypa
 
         // Send the transaction
         const connection = getSolanaConnection();
-        // Small jitter to avoid synchronized spikes
-        await jitteredSleep(120, 0.5);
         const signature = await rateLimitedRpcCall(async () => {
-            return await connection.sendRawTransaction(transaction.serialize(), {
-                skipPreflight: true,
-                maxRetries: 0
-            });
+            return await connection.sendTransaction(transaction);
         });
         console.log(`[LocalTransactionService] ✅ Token creation transaction sent: ${signature}`);
 
@@ -153,13 +148,8 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
 
         // Send the transaction
         const connection = getSolanaConnection();
-        // Jitter to reduce RPC burst across parallel sends
-        await jitteredSleep(120, 0.5);
         const signature = await rateLimitedRpcCall(async () => {
-            return await connection.sendRawTransaction(transaction.serialize(), {
-                skipPreflight: true,
-                maxRetries: 0
-            });
+            return await connection.sendTransaction(transaction);
         });
         console.log(`[LocalTransactionService] ✅ ${action} transaction sent: ${signature}`);
 
@@ -191,8 +181,6 @@ async function executeParallelTransactions(transactionRequests, batchSize = PARA
         // Execute batch in parallel
         const batchPromises = batch.map(async (request, index) => {
             try {
-                // Slight stagger per item within the batch
-                await jitteredSleep(80 + index * 40, 0.5);
                 const signature = await executeTradeLocalTransaction(
                     request.action,
                     request.mintAddress,
@@ -225,9 +213,9 @@ async function executeParallelTransactions(transactionRequests, batchSize = PARA
         const batchResults = await Promise.all(batchPromises);
         results.push(...batchResults);
         
-        // Small jittered delay between batches to avoid overwhelming the network
+        // Small delay between batches to avoid overwhelming the network
         if (i + batchSize < transactionRequests.length) {
-            await jitteredSleep(450, 0.4);
+            await sleep(500);
         }
     }
     
@@ -354,32 +342,7 @@ async function confirmParallelTransactions(signatures, commitment = 'confirmed',
     const results = await Promise.all(confirmationPromises);
     const confirmedCount = results.filter(r => r.confirmed).length;
     console.log(`[LocalTransactionService] ✅ WebSocket confirmation complete: ${confirmedCount}/${signatures.length} transactions confirmed`);
-
-    // Batched RPC fallback for any unconfirmed signatures
-    const pending = results.filter(r => !r.confirmed).map(r => r.signature);
-    if (pending.length > 0) {
-        try {
-            console.log(`[LocalTransactionService] Performing batched status check for ${pending.length} pending signatures...`);
-            const connection = getSolanaConnection();
-            const statuses = await batchGetSignatureStatuses(connection, pending);
-            const statusMap = new Map(statuses.map(s => [s.signature, s.status]));
-            for (const r of results) {
-                if (!r.confirmed) {
-                    const st = statusMap.get(r.signature);
-                    if (st && st.confirmationStatus && !st.err) {
-                        const isConfirmed = st.confirmationStatus === commitment || (commitment === 'confirmed' && st.confirmationStatus === 'finalized');
-                        if (isConfirmed) {
-                            r.confirmed = true;
-                            r.fallbackConfirmed = true;
-                        }
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn(`[LocalTransactionService] Batched status check failed: ${e.message}`);
-        }
-    }
-
+    
     return results;
 }
 
