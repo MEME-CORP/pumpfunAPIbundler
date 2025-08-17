@@ -46,6 +46,18 @@ function getRpcConfig() {
 
 const currentRpcConfig = getRpcConfig();
 
+// Simple in-memory caches and RPC stats
+// Blockhash cache TTL tuned by provider type (longer for public RPCs)
+const BLOCKHASH_CACHE_TTL_MS = (currentRpcConfig.name === 'Public Mainnet-Beta') ? 4000 : 1500;
+const _blockhashCache = new Map(); // key: `${rpcEndpoint}|${commitment}` -> { ts, value }
+
+// RPC stats for adaptive backoff/jitter decisions
+let rpcStats = {
+    callCount: 0,
+    rateLimit429Count: 0,
+    last429TimeMs: 0
+};
+
 /**
  * Enhanced RPC rate limiting protection based on provider type
  */
@@ -61,6 +73,7 @@ async function rateLimitedRpcCall(rpcFunction, retries = 3) {
     concurrentRequests++;
 
     try {
+        rpcStats.callCount++;
         for (let i = 0; i < retries; i++) {
             try {
                 // Ensure minimum interval between RPC calls
@@ -76,6 +89,8 @@ async function rateLimitedRpcCall(rpcFunction, retries = 3) {
                 if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
                     const backoffTime = Math.min(currentRpcConfig.retryBackoff * Math.pow(2, i), 30000);
                     console.warn(`[TransactionUtils] RPC rate limited, waiting ${backoffTime}ms (attempt ${i + 1}/${retries})`);
+                    rpcStats.rateLimit429Count++;
+                    rpcStats.last429TimeMs = Date.now();
                     await sleep(backoffTime);
                     continue;
                 }
@@ -96,13 +111,29 @@ async function rateLimitedRpcCall(rpcFunction, retries = 3) {
  */
 async function getRecentBlockhash(connection, commitment = 'confirmed') {
     console.log(`[TransactionUtils] Fetching recent blockhash with commitment: ${commitment}`);
+    try {
+        const rpcEndpoint = connection.rpcEndpoint || 'unknown';
+        const cacheKey = `${rpcEndpoint}|${commitment}`;
+        const now = Date.now();
+        const cached = _blockhashCache.get(cacheKey);
+        if (cached && (now - cached.ts) < BLOCKHASH_CACHE_TTL_MS) {
+            const age = now - cached.ts;
+            console.log(`[TransactionUtils] Using cached blockhash (${age}ms old): ${cached.value.blockhash.slice(0, 8)}...`);
+            return cached.value;
+        }
 
-    const result = await rateLimitedRpcCall(async () => {
-        return await connection.getLatestBlockhash(commitment);
-    });
+        const result = await rateLimitedRpcCall(async () => {
+            return await connection.getLatestBlockhash(commitment);
+        });
 
-    console.log(`[TransactionUtils] Blockhash obtained: ${result.blockhash.slice(0, 8)}...`);
-    return result;
+        _blockhashCache.set(cacheKey, { ts: now, value: result });
+        console.log(`[TransactionUtils] Blockhash obtained: ${result.blockhash.slice(0, 8)}...`);
+        return result;
+    } catch (e) {
+        console.warn(`[TransactionUtils] Blockhash fetch error (no cache fallback): ${e.message}`);
+        // Re-throw; callers should handle
+        throw e;
+    }
 }
 
 /**
@@ -112,6 +143,53 @@ async function getRecentBlockhash(connection, commitment = 'confirmed') {
  */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Returns a shallow copy of RPC stats for adaptive decisions.
+ */
+function getRpcStats() {
+    return { ...rpcStats };
+}
+
+/**
+ * Jitter helper: returns a randomized duration around baseMs.
+ * @param {number} baseMs
+ * @param {number} jitterRatio - 0.3 means ±30%
+ */
+function jitterMs(baseMs, jitterRatio = 0.3) {
+    const delta = baseMs * jitterRatio;
+    return Math.max(0, Math.floor(baseMs - delta + Math.random() * (2 * delta)));
+}
+
+/**
+ * Adaptive jittered sleep based on recent 429s and provider profile.
+ * Increases delay when rate limits are detected recently.
+ */
+async function jitteredSleep(baseMs = 400, jitterRatio = 0.3) {
+    const stats = getRpcStats();
+    let factor = 1.0;
+    const sinceLast429 = Date.now() - (stats.last429TimeMs || 0);
+    if (stats.rateLimit429Count > 0 && sinceLast429 < 30000) {
+        factor += Math.min(0.25 * stats.rateLimit429Count, 1.5); // up to +150%
+    }
+    const target = jitterMs(baseMs * factor, jitterRatio);
+    await sleep(target);
+}
+
+/**
+ * Batch get signature statuses to reduce RPC calls.
+ * @param {web3.Connection} connection
+ * @param {string[]} signatures
+ * @returns {Promise<Array<{signature: string, status: any}>>}
+ */
+async function batchGetSignatureStatuses(connection, signatures) {
+    if (!Array.isArray(signatures) || signatures.length === 0) return [];
+    const resp = await rateLimitedRpcCall(async () => {
+        return await connection.getSignatureStatuses(signatures);
+    });
+    const values = (resp && resp.value) || [];
+    return signatures.map((sig, idx) => ({ signature: sig, status: values[idx] || null }));
 }
 
 /**
@@ -842,6 +920,8 @@ module.exports = {
     checkTransactionStatus,
     sleep,
     rateLimitedRpcCall,
+    jitteredSleep,
+    batchGetSignatureStatuses,
     getRpcConfig: () => currentRpcConfig,
     RPC_CONFIGS,
 
@@ -855,6 +935,4 @@ module.exports = {
     // Jupiter-specific functions
     addPriorityFeeInstructionsVersioned,
     sendAndConfirmVersionedTransaction,
-
-
-}; 
+};
