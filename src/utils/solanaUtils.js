@@ -80,13 +80,11 @@ async function getTokenBalance(walletPublicKey, mintAddress, connectionOverride 
         
         const connection = connectionOverride || getSolanaConnection();
         
-        const result = await retryWithRpcConfig(async () => {
-            return await rateLimitedRpcCall(async () => {
-                return await connection.getParsedTokenAccountsByOwner(
-                    walletPubKey,
-                    { mint: mintPubKey }
-                );
-            });
+        const result = await rateLimitedRpcCall(async () => {
+            return await connection.getParsedTokenAccountsByOwner(
+                walletPubKey,
+                { mint: mintPubKey }
+            );
         });
 
         if (!result.value || result.value.length === 0) {
@@ -133,13 +131,11 @@ async function getAllTokenBalances(walletPublicKey, connectionOverride = null) {
         
         const connection = connectionOverride || getSolanaConnection();
         
-        const result = await retryWithRpcConfig(async () => {
-            return await rateLimitedRpcCall(async () => {
-                return await connection.getParsedTokenAccountsByOwner(
-                    walletPubKey,
-                    { programId: new web3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') } // SPL Token Program
-                );
-            });
+        const result = await rateLimitedRpcCall(async () => {
+            return await connection.getParsedTokenAccountsByOwner(
+                walletPubKey,
+                { programId: new web3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') } // SPL Token Program
+            );
         });
 
         if (!result.value || result.value.length === 0) {
@@ -200,7 +196,7 @@ async function getWalletSummary(walletPublicKey, connectionOverride = null) {
         const { getWalletBalance } = require('./walletUtils');
         
         const [solBalance, tokenBalances] = await Promise.all([
-            retryWithRpcConfig(() => getWalletBalance(connection, walletPubKey)),
+            getWalletBalance(connection, walletPubKey),
             getAllTokenBalances(walletPublicKey, connection)
         ]);
         
