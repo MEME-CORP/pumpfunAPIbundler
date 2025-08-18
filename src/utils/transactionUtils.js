@@ -12,10 +12,10 @@ const RPC_CONFIGS = {
     // Per method limit: 40 req/10s = 4 RPS = 250ms minimum interval per method
     PUBLIC: {
         name: 'Public Mainnet-Beta',
-        rpcCallInterval: 2500, // 2500ms between calls (4 req/10s = safe margin under 40 req/10s per method)
+        rpcCallInterval: 600, // 2500ms between calls (4 req/10s = safe margin under 40 req/10s per method)
         maxConcurrentRequests: 1, // Single concurrent request to avoid method-specific bursts
-        retryBackoff: 3000, // 3s initial backoff for 429 errors (reduced from 15s)
-        confirmationTimeout: 20000, // 20s confirmation timeout
+        retryBackoff: 1000, // 3s initial backoff for 429 errors (reduced from 15s)
+        confirmationTimeout: 18000, // 20s confirmation timeout
         useWebSocket: true, // Always use WebSocket to avoid polling overhead
         description: 'Free public RPC optimized for 40 req/10s per method limit'
     },
@@ -23,10 +23,10 @@ const RPC_CONFIGS = {
     // Premium providers (QuickNode, Helius, Alchemy) - relaxed settings
     PREMIUM: {
         name: 'Premium RPC Provider',
-        rpcCallInterval: 100, // 100ms between calls (higher limits)
-        maxConcurrentRequests: 10, // More concurrent requests allowed
-        retryBackoff: 1000, // 1s backoff
-        confirmationTimeout: 10000, // 10s confirmation timeout
+        rpcCallInterval: 300, // 100ms between calls (higher limits)
+        maxConcurrentRequests: 2, // More concurrent requests allowed
+        retryBackoff: 800, // 1s backoff
+        confirmationTimeout: 12000, // 10s confirmation timeout
         useWebSocket: true, // WebSocket preferred but polling fallback available
         description: 'Premium RPC with higher rate limits and better performance'
     }

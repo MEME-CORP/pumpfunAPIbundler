@@ -19,6 +19,7 @@ const { sleep, confirmTransactionAdvanced, rateLimitedRpcCall } = require('../ut
 const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = 'https://pumpportal.fun/api/trade-local';
 const DEFAULT_PRIORITY_FEE = 0.0005; // 0.0005 SOL as specified
 const PARALLEL_BATCH_SIZE = 4; // Process 4 transactions in parallel
+const FETCH_TIMEOUT_MS = 20000; // Abort fetch if Pump Portal hangs
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 
@@ -63,7 +64,8 @@ async function createTokenLocalTransaction(tokenMetadata, metadataUri, mintKeypa
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify(createRequestBody)
+            body: JSON.stringify(createRequestBody),
+            timeout: FETCH_TIMEOUT_MS
         });
 
         if (createResponse.status !== 200) {
@@ -108,9 +110,21 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
     try {
         // Guard against invalid sell amounts to prevent zero-amount attempts and redundant retries
         if (action === 'sell') {
-            const amt = Number(amount);
-            if (!Number.isFinite(amt) || amt <= 0) {
-                throw new Error(`Invalid sell amount: ${amount}. Must be > 0 tokens.`);
+            // Allow either a numeric token amount (>0) or a percentage string like "100%"
+            if (typeof amount === 'string' && amount.trim().endsWith('%')) {
+                const pct = parseFloat(amount.trim().replace('%', ''));
+                if (Number.isNaN(pct) || pct <= 0 || pct > 100) {
+                    throw new Error(`Invalid sell amount percentage: ${amount}. Must be between 0 and 100%.`);
+                }
+            } else {
+                const amtNum = Number(amount);
+                if (!Number.isFinite(amtNum) || amtNum <= 0) {
+                    throw new Error(`Invalid sell amount: ${amount}. Must be > 0 tokens.`);
+                }
+                // Enforce integer token amount when denominatedInSol=false
+                if (denominatedInSol === false && !Number.isInteger(amtNum)) {
+                    amount = Math.floor(amtNum);
+                }
             }
             if (denominatedInSol === true) {
                 console.warn(`[LocalTransactionService] Warning: 'sell' with denominatedInSol=true; expected false (token amount).`);
@@ -127,13 +141,16 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
             priorityFee: DEFAULT_PRIORITY_FEE,
             pool: pool
         };
+        // Sanitized request log for debugging (no private keys)
+        console.log(`[LocalTransactionService] trade-local request: action=${action}, mint=${mintAddress}, denominatedInSol=${denominatedInSol}, amount=${requestBody.amount}, slippage=${slippage / 100}, pool=${pool}`);
 
         const response = await fetch(PUMP_PORTAL_TRADE_LOCAL_ENDPOINT, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify(requestBody),
+            timeout: FETCH_TIMEOUT_MS
         });
 
         if (response.status !== 200) {
@@ -357,6 +374,7 @@ module.exports = {
     PUMP_PORTAL_TRADE_LOCAL_ENDPOINT,
     DEFAULT_PRIORITY_FEE,
     PARALLEL_BATCH_SIZE,
+    FETCH_TIMEOUT_MS,
     MAX_RETRIES,
     RETRY_DELAY_MS
 };
