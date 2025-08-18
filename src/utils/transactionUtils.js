@@ -14,7 +14,7 @@ const RPC_CONFIGS = {
         name: 'Public Mainnet-Beta',
         rpcCallInterval: 600, // 2500ms between calls (4 req/10s = safe margin under 40 req/10s per method)
         maxConcurrentRequests: 1, // Single concurrent request to avoid method-specific bursts
-        retryBackoff: 1000, // 3s initial backoff for 429 errors (reduced from 15s)
+        retryBackoff: 1500, // 3s initial backoff for 429 errors (reduced from 15s)
         confirmationTimeout: 18000, // 20s confirmation timeout
         useWebSocket: true, // Always use WebSocket to avoid polling overhead
         description: 'Free public RPC optimized for 40 req/10s per method limit'
