@@ -1,6 +1,6 @@
 const web3 = require('@solana/web3.js');
 const { getSolanaConnection } = require('./walletUtils');
-const { rateLimitedRpcCall, sleep } = require('./transactionUtils');
+const { rateLimitedRpcCall, sleep, getRpcConfig } = require('./transactionUtils');
 
 /**
  * Enhanced Solana Utilities for SPL Token Operations
@@ -11,15 +11,6 @@ const { rateLimitedRpcCall, sleep } = require('./transactionUtils');
  * - Progressive Construction: Built upon existing RPC management infrastructure
  * - Dependency Transparency: Integrates with transactionUtils.js RPC config
  */
-
-/**
- * Sleep utility function
- * @param {number} ms - Milliseconds to sleep
- * @returns {Promise<void>}
- */
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 /**
  * Enhanced retry function with exponential backoff integrated with RPC configuration
