@@ -1,6 +1,6 @@
 const web3 = require('@solana/web3.js');
 const { getSolanaConnection } = require('./walletUtils');
-const { rateLimitedRpcCall, getRpcConfig } = require('./transactionUtils');
+const { rateLimitedRpcCall, sleep } = require('./transactionUtils');
 
 /**
  * Enhanced Solana Utilities for SPL Token Operations
@@ -169,6 +169,57 @@ async function getAllTokenBalances(walletPublicKey, connectionOverride = null) {
 }
 
 /**
+ * Gets specific SPL token balances for multiple wallets in parallel batches
+ * @param {Array<string>} walletPublicKeys - Array of wallet public keys as strings
+ * @param {string} mintAddress - The token mint address to check balances for
+ * @param {web3.Connection} [connectionOverride] - Optional connection override
+ * @param {number} [batchSize=4] - Number of balance checks to process in parallel (configurable for premium RPC)
+ * @returns {Promise<Array<{publicKey: string, balance: number, decimals: number}>>} Array of wallet token balances
+ */
+async function getBatchedTokenBalances(walletPublicKeys, mintAddress, connectionOverride = null, batchSize = 4) {
+    console.log(`[SolanaUtils] Getting token balances for ${walletPublicKeys.length} wallets in batches of ${batchSize}`);
+    
+    const connection = connectionOverride || getSolanaConnection();
+    const results = [];
+    
+    // Process wallets in batches
+    for (let i = 0; i < walletPublicKeys.length; i += batchSize) {
+        const batch = walletPublicKeys.slice(i, i + batchSize);
+        console.log(`[SolanaUtils] Processing balance batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(walletPublicKeys.length/batchSize)} (${batch.length} wallets)`);
+        
+        // Execute batch balance checks in parallel
+        const batchPromises = batch.map(async (publicKey) => {
+            try {
+                const tokenBalanceInfo = await getTokenBalance(publicKey, mintAddress, connection);
+                return {
+                    publicKey: publicKey,
+                    balance: tokenBalanceInfo.balance,
+                    decimals: tokenBalanceInfo.decimals
+                };
+            } catch (error) {
+                console.error(`[SolanaUtils] Balance check failed for ${publicKey.slice(0, 8)}: ${error.message}`);
+                return {
+                    publicKey: publicKey,
+                    balance: 0,
+                    decimals: 9 // Default decimals for failed lookups
+                };
+            }
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+        
+        // Small delay between batches to respect rate limiting
+        if (i + batchSize < walletPublicKeys.length) {
+            await sleep(100);
+        }
+    }
+    
+    console.log(`[SolanaUtils] ✅ Completed batched balance checks for ${results.length} wallets`);
+    return results;
+}
+
+/**
  * Gets complete wallet summary (SOL + all SPL tokens)
  * @param {string} walletPublicKey - The wallet's public key as string
  * @param {web3.Connection} [connectionOverride] - Optional connection override
@@ -297,6 +348,7 @@ module.exports = {
     // Core SPL token functions
     getTokenBalance,
     getAllTokenBalances,
+    getBatchedTokenBalances,
     getWalletSummary,
     getFormattedTokenBalance,
     hasTokens,

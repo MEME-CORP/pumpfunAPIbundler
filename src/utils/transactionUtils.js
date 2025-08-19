@@ -23,10 +23,10 @@ const RPC_CONFIGS = {
     // Premium providers (QuickNode, Helius, Alchemy) - relaxed settings
     PREMIUM: {
         name: 'Premium RPC Provider',
-        rpcCallInterval: 300, // 100ms between calls (higher limits)
-        maxConcurrentRequests: 2, // More concurrent requests allowed
-        retryBackoff: 800, // 1s backoff
-        confirmationTimeout: 12000, // 10s confirmation timeout
+        rpcCallInterval: 1500, // 100ms between calls (higher limits)
+        maxConcurrentRequests: 4, // More concurrent requests allowed
+        retryBackoff: 500, // 1s backoff
+        confirmationTimeout: 5000, // 10s confirmation timeout
         useWebSocket: true, // WebSocket preferred but polling fallback available
         description: 'Premium RPC with higher rate limits and better performance'
     }

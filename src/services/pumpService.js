@@ -25,7 +25,7 @@ const {
     CHILD_WALLETS_FILE,
 } = require('../utils/walletUtils');
 // MONOCODE Fix: Use rate-limited token balance function instead of direct RPC calls
-const { getTokenBalance } = require('../utils/solanaUtils');
+const { getTokenBalance, getAllTokenBalances, getBatchedTokenBalances, getWalletSummary, getFormattedTokenBalance, hasTokens } = require('../utils/solanaUtils');
 const { validateWalletsForTokenOperations } = require('./walletService');
 const { 
     uploadMetadataToPumpPortal, 
@@ -834,12 +834,11 @@ async function batchSellService(
                 if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
                     throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 0 and 100.`);
                 }
-                // MONOCODE Fix: Sequential balance checks to prevent RPC burst overload
-                const tokenBalances = [];
-                for (const wallet of batch) {
-                    const tokenBalanceInfo = await getTokenBalance(wallet.publicKey, mintAddress, connection);
-                    tokenBalances.push(tokenBalanceInfo.balance);
-                }
+                // MONOCODE Fix: Batched parallel balance checks (configurable batch size for premium RPC)
+                const walletPublicKeys = batch.map(wallet => wallet.publicKey);
+                const batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 8 : 4;
+                const batchedBalanceResults = await getBatchedTokenBalances(walletPublicKeys, mintAddress, connection, batchSize);
+                const tokenBalances = batchedBalanceResults.map(result => result.balance);
                 let skippedZero = 0;
                 const sellRequests = [];
                 batch.forEach((wallet, idx) => {
