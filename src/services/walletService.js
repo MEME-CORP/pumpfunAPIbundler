@@ -461,8 +461,8 @@ async function processBatchedBalanceRequests(requests, mintAddress) {
         const walletPublicKeys = requests.map(req => req.publicKeyString);
         const connection = getSolanaConnection();
         
-        // Dynamic batch size based on RPC type
-        const batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 8 : 4;
+        // MONOCODE Fix: Reduced batch size to prevent 429 errors - 2 for public RPC, 5 for premium RPC
+        const batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 5 : 2;
         const batchResults = await getBatchedTokenBalances(walletPublicKeys, mintAddress, connection, batchSize);
         
         // Map results back to individual requests

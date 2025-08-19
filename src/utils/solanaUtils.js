@@ -167,7 +167,11 @@ async function getAllTokenBalances(walletPublicKey, connectionOverride = null) {
  * @param {number} [batchSize=4] - Number of balance checks to process in parallel (configurable for premium RPC)
  * @returns {Promise<Array<{publicKey: string, balance: number, decimals: number}>>} Array of wallet token balances
  */
-async function getBatchedTokenBalances(walletPublicKeys, mintAddress, connectionOverride = null, batchSize = 4) {
+async function getBatchedTokenBalances(walletPublicKeys, mintAddress, connectionOverride = null, batchSize = null) {
+    // MONOCODE Fix: Dynamic batch size to prevent 429 errors - 2 for public RPC, 5 for premium RPC
+    if (batchSize === null) {
+        batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 5 : 2;
+    }
     console.log(`[SolanaUtils] Getting token balances for ${walletPublicKeys.length} wallets in batches of ${batchSize}`);
     
     const connection = connectionOverride || getSolanaConnection();

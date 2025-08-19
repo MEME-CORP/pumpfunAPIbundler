@@ -18,7 +18,8 @@ const { sleep, confirmTransactionAdvanced, rateLimitedRpcCall } = require('../ut
 // Constants for local transactions
 const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = 'https://pumpportal.fun/api/trade-local';
 const DEFAULT_PRIORITY_FEE = 0.0005; // 0.0005 SOL as specified
-const PARALLEL_BATCH_SIZE = 4; // Process 4 transactions in parallel
+const PARALLEL_BATCH_SIZE_PUBLIC = 2; // Process 2 transactions in parallel for public RPC
+const PARALLEL_BATCH_SIZE_PREMIUM = 5; // Process 5 transactions in parallel for premium RPC
 const FETCH_TIMEOUT_MS = 20000; // Abort fetch if Pump Portal hangs
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
@@ -184,12 +185,17 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
 }
 
 /**
- * Executes multiple transactions in parallel batches
+ * Executes multiple trade transactions in parallel batches.
  * @param {Array} transactionRequests - Array of transaction request objects
- * @param {number} batchSize - Number of transactions to process in parallel (default 4)
+ * @param {number} batchSize - Number of transactions to process in parallel (auto-detected based on RPC)
  * @returns {Promise<Array>} Array of transaction signatures
  */
-async function executeParallelTransactions(transactionRequests, batchSize = PARALLEL_BATCH_SIZE) {
+async function executeParallelTransactions(transactionRequests, batchSize = null) {
+    // MONOCODE Fix: Dynamic batch size based on RPC type to prevent 429 errors
+    if (batchSize === null) {
+        batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 
+            PARALLEL_BATCH_SIZE_PREMIUM : PARALLEL_BATCH_SIZE_PUBLIC;
+    }
     console.log(`[LocalTransactionService] Executing ${transactionRequests.length} transactions in parallel batches of ${batchSize}`);
     
     const results = [];
@@ -378,7 +384,8 @@ module.exports = {
     // Constants
     PUMP_PORTAL_TRADE_LOCAL_ENDPOINT,
     DEFAULT_PRIORITY_FEE,
-    PARALLEL_BATCH_SIZE,
+    PARALLEL_BATCH_SIZE_PUBLIC,
+    PARALLEL_BATCH_SIZE_PREMIUM,
     FETCH_TIMEOUT_MS,
     MAX_RETRIES,
     RETRY_DELAY_MS

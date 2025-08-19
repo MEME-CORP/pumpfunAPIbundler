@@ -835,9 +835,9 @@ async function batchSellService(
                 if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
                     throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 0 and 100.`);
                 }
-                // MONOCODE Fix: Batched parallel balance checks (configurable batch size for premium RPC)
+                // MONOCODE Fix: Reduced batch size to prevent 429 errors - 2 for public RPC, 5 for premium RPC
                 const walletPublicKeys = batch.map(wallet => wallet.publicKey);
-                const batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 8 : 4;
+                const batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 5 : 2;
                 const batchedBalanceResults = await getBatchedTokenBalances(walletPublicKeys, mintAddress, connection, batchSize);
                 const tokenBalances = batchedBalanceResults.map(result => result.balance);
                 let skippedZero = 0;
