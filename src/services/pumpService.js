@@ -698,13 +698,14 @@ async function devSellService(
 
         console.log(`[PumpService] Executing DevWallet sell transaction for ${sellAmountPercentage} of ${mintAddress}...`);
 
-        // Execute single sell transaction using local transaction service
+        // MONOCODE Fix: Pass percentage string directly to Portal API instead of calculated amount
+        // Portal API supports percentage strings for sell operations (e.g., "100%")
         const sellSignature = await executeTradeLocalTransaction(
             'sell',
             mintAddress,
             devWallet.keypair,
-            amountToSell, // Use calculated token amount instead of percentage
-            false, // denominatedInSol
+            sellAmountPercentage, // Pass percentage string directly (e.g., "100%")
+            false, // denominatedInSol - false when using percentage
             slippageBps
         );
 

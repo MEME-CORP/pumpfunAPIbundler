@@ -141,6 +141,11 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
             priorityFee: DEFAULT_PRIORITY_FEE,
             pool: pool
         };
+        
+        // MONOCODE Fix: For sell operations, ensure amount is string when using percentage
+        if (action === 'sell' && typeof amount === 'string' && amount.includes('%')) {
+            requestBody.amount = amount; // Keep percentage as string
+        }
         // Sanitized request log for debugging (no private keys)
         console.log(`[LocalTransactionService] trade-local request: action=${action}, mint=${mintAddress}, denominatedInSol=${denominatedInSol}, amount=${requestBody.amount}, slippage=${slippage / 100}, pool=${pool}`);
 

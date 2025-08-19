@@ -3,10 +3,15 @@ const bs58 = require('bs58');
 const { saveKeypairToFile, loadKeypairFromFile, loadChildWalletsFromFile, saveChildWalletsToFile, getWalletBalance, getSolanaConnection, WALLETS_DIR } = require('../utils/walletUtils');
 const { sendAndConfirmTransactionRobustly, sleep, calculateTransactionFee, calculateTransactionCostWithRent, validateBalanceForRentOperations, getRentExemptionForAccountType } = require('../utils/transactionUtils');
 // PHASE 2: Enhanced SPL Token Balance Support
-const { getTokenBalance, getAllTokenBalances, getWalletSummary, getFormattedTokenBalance, hasTokens } = require('../utils/solanaUtils');
+const { getTokenBalance, getAllTokenBalances, getBatchedTokenBalances, getWalletSummary, getFormattedTokenBalance, hasTokens } = require('../utils/solanaUtils');
 
 // MONOCODE Compliance: Fix bs58 decoder compatibility issue
 const bs58Decoder = bs58.default || bs58;
+
+// MONOCODE Enhancement: Intelligent batching coordinator for balance requests
+const pendingBalanceRequests = new Map(); // mint -> { requests: Array, timeout: NodeJS.Timeout }
+const BATCH_THRESHOLD = 4; // Minimum requests to trigger batching
+const BATCH_WINDOW_MS = 1000; // Time window to accumulate requests
 
 const MOTHER_WALLET_FILE = 'motherWallet.json';
 const CHILD_WALLETS_FILE = 'childWallets.json';
@@ -409,8 +414,116 @@ async function returnFundsToMotherWalletService(childWallets, motherWalletPublic
 // ============================================================================
 
 /**
+ * Intelligent batching coordinator for token balance requests
+ * MONOCODE Compliance: Observable implementation with automatic optimization
+ * @param {string} publicKeyString - The wallet's public key as string
+ * @param {string} mintAddress - The token mint address as string
+ * @returns {Promise<object>} Token balance info with batching optimization
+ */
+async function getTokenBalanceWithIntelligentBatching(publicKeyString, mintAddress) {
+    return new Promise((resolve, reject) => {
+        const requestKey = mintAddress;
+        const request = { publicKeyString, mintAddress, resolve, reject };
+        
+        if (!pendingBalanceRequests.has(requestKey)) {
+            // First request for this mint - start accumulation window
+            pendingBalanceRequests.set(requestKey, {
+                requests: [request],
+                timeout: setTimeout(async () => {
+                    const batch = pendingBalanceRequests.get(requestKey);
+                    pendingBalanceRequests.delete(requestKey);
+                    
+                    if (batch.requests.length >= BATCH_THRESHOLD) {
+                        // Use batched processing
+                        console.log(`[WalletService] 🚀 Batching ${batch.requests.length} balance requests for mint: ${mintAddress.slice(0, 8)}...`);
+                        await processBatchedBalanceRequests(batch.requests, mintAddress);
+                    } else {
+                        // Process individually
+                        console.log(`[WalletService] Processing ${batch.requests.length} individual balance requests for mint: ${mintAddress.slice(0, 8)}...`);
+                        await processIndividualBalanceRequests(batch.requests, mintAddress);
+                    }
+                }, BATCH_WINDOW_MS)
+            });
+        } else {
+            // Add to existing batch
+            pendingBalanceRequests.get(requestKey).requests.push(request);
+        }
+    });
+}
+
+/**
+ * Processes balance requests using batched RPC calls
+ * @param {Array} requests - Array of request objects
+ * @param {string} mintAddress - The token mint address
+ */
+async function processBatchedBalanceRequests(requests, mintAddress) {
+    try {
+        const walletPublicKeys = requests.map(req => req.publicKeyString);
+        const connection = getSolanaConnection();
+        
+        // Dynamic batch size based on RPC type
+        const batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 8 : 4;
+        const batchResults = await getBatchedTokenBalances(walletPublicKeys, mintAddress, connection, batchSize);
+        
+        // Map results back to individual requests
+        requests.forEach((request, index) => {
+            const result = batchResults[index];
+            const response = {
+                publicKey: request.publicKeyString,
+                mint: mintAddress,
+                balance: result.balance,
+                decimals: result.decimals,
+                uiAmount: result.balance / Math.pow(10, result.decimals),
+                timestamp: new Date().toISOString(),
+                status: 'success',
+                batched: true // Indicate this was processed in batch
+            };
+            request.resolve(response);
+        });
+        
+        console.log(`[WalletService] ✅ Batched balance processing complete: ${requests.length} wallets`);
+    } catch (error) {
+        console.error(`[WalletService] ❌ Batch processing error: ${error.message}`);
+        // Fallback to individual processing on batch failure
+        await processIndividualBalanceRequests(requests, mintAddress);
+    }
+}
+
+/**
+ * Processes balance requests individually as fallback
+ * @param {Array} requests - Array of request objects
+ * @param {string} mintAddress - The token mint address
+ */
+async function processIndividualBalanceRequests(requests, mintAddress) {
+    for (const request of requests) {
+        try {
+            const tokenInfo = await getTokenBalance(request.publicKeyString, mintAddress);
+            const response = {
+                publicKey: request.publicKeyString,
+                mint: mintAddress,
+                balance: tokenInfo.balance,
+                decimals: tokenInfo.decimals,
+                uiAmount: tokenInfo.balance / Math.pow(10, tokenInfo.decimals),
+                timestamp: new Date().toISOString(),
+                status: 'success',
+                batched: false
+            };
+            
+            if (tokenInfo.error) {
+                response.warning = tokenInfo.error;
+                response.status = 'partial_success';
+            }
+            
+            request.resolve(response);
+        } catch (error) {
+            request.reject(error);
+        }
+    }
+}
+
+/**
  * Gets SPL token balance for a specific mint address.
- * MONOCODE Compliance: Explicit error handling with structured responses
+ * MONOCODE Compliance: Enhanced with intelligent batching while maintaining API compatibility
  * @param {string} publicKeyString - The wallet's public key as string
  * @param {string} mintAddress - The token mint address as string
  * @returns {Promise<object>} Token balance info with error handling
@@ -438,26 +551,10 @@ async function getTokenBalanceService(publicKeyString, mintAddress) {
             throw new Error(`Invalid mint address format: ${error.message}`);
         }
         
-        const tokenInfo = await getTokenBalance(publicKeyString, mintAddress);
+        // Use intelligent batching coordinator
+        const response = await getTokenBalanceWithIntelligentBatching(publicKeyString, mintAddress);
         
-        // Enhanced response with additional metadata
-        const response = {
-            publicKey: publicKeyString,
-            mint: mintAddress,
-            balance: tokenInfo.balance,
-            decimals: tokenInfo.decimals,
-            uiAmount: tokenInfo.balance / Math.pow(10, tokenInfo.decimals),
-            timestamp: new Date().toISOString(),
-            status: 'success'
-        };
-        
-        // Include error if present but still return data
-        if (tokenInfo.error) {
-            response.warning = tokenInfo.error;
-            response.status = 'partial_success';
-        }
-        
-        console.log(`[WalletService] ✅ Token balance retrieved: ${response.uiAmount} UI units`);
+        console.log(`[WalletService] ✅ Token balance retrieved: ${response.uiAmount} UI units${response.batched ? ' (batched)' : ''}`);
         return response;
         
     } catch (error) {
@@ -472,7 +569,8 @@ async function getTokenBalanceService(publicKeyString, mintAddress) {
             uiAmount: 0,
             timestamp: new Date().toISOString(),
             status: 'error',
-            error: error.message
+            error: error.message,
+            batched: false
         };
     }
 }
