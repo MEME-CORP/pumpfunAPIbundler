@@ -354,12 +354,15 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
   - **sellAmountPercentage**: Percentage of tokens to sell (e.g., "50%" or 50)
   - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%). API converts to percentage format for pump.fun
   - **wallets**: Array of wallet objects containing at least the DevWallet (required for stateless operation)
-- **Response:** Bundle ID, transaction details, status.
+- **Response:** Transaction signature, transaction details, status.
 - **Important Notes:**
+  - **Simplified Operation**: No client-side token balance lookups required. The API validates percentage and passes it directly to Pump Portal for server-side balance calculation
   - **Stateless Operation**: DevWallet credentials must be provided in the request
+  - **Balance Validation**: Token balance validation and amount calculation handled by Pump Portal API
+  - **Zero Balance Handling**: Graceful error handling if wallet has zero token balance
   - **Required Wallet**: The wallets array must contain a wallet named "DevWallet"
   - **Private Keys**: Must be base58 encoded Solana keypairs
-- **Minimum SOL Balance:** DevWallet needs **0.055 SOL** minimum to cover transaction fees and Jito tips
+- **Minimum SOL Balance:** DevWallet needs **0.055 SOL** minimum to cover transaction fees and priority fees
 
 #### 4. Batch Sell (All Non-DevWallets)
 - **POST** `/api/pump/batch-sell`
@@ -382,12 +385,15 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
   - **slippageBps**: Slippage in basis points (e.g., 2500 = 25%). API converts to percentage format for pump.fun
   - **wallets**: Array of wallet objects with `name` and `privateKey` properties (required for stateless operation)
   - **targetWalletNames**: Optional filter to only use specific wallets from the provided wallets array
-- **Response:** Bundle results, transaction details, status.
+- **Response:** Parallel transaction signatures, transaction details, status.
 - **Important Notes:**
+  - **Simplified Operation**: No client-side token balance lookups or pre-filtering. The API sends percentage string to all wallets and lets Pump Portal handle balance validation
   - **Stateless Operation**: All wallet credentials must be provided in the request
+  - **Zero Balance Handling**: Wallets with zero token balance are handled gracefully with clear error messages from Pump Portal
   - **Excluded Wallets**: Automatically excludes DevWallet from batch selling (use `/api/pump/sell-dev` for DevWallet)
+  - **Parallel Execution**: Processes sells in batches of 2-5 transactions (depending on RPC type) for optimal rate limit compliance
   - **Private Keys**: Must be base58 encoded Solana keypairs
-- **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum (tipper wallet needs 0.055 SOL minimum)
+- **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum to cover transaction fees and priority fees
 
 ---
 
@@ -465,9 +471,11 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
   ```
 - **Response:** Signature, tokens sold, percentage, dev wallet address, pool type
 - **Important Notes:**
+  - **Simplified Operation**: Uses percentage-based selling without client-side balance lookups
   - Uses local transactions with `pool: "bonk"`
   - Only DevWallet can use this endpoint
-  - Calculates sell amount based on current token balance
+  - **Balance Validation**: Token balance validation and amount calculation handled by Pump Portal API
+  - **Zero Balance Handling**: Graceful error handling if wallet has zero token balance
 
 #### 4. Bonk Batch Sell
 - **POST** `/api/bonk/batch-sell`
@@ -486,9 +494,11 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
   ```
 - **Response:** Signatures, wallets used, total tokens sold, pool type
 - **Important Notes:**
+  - **Simplified Operation**: No client-side token balance lookups or pre-filtering. Sends percentage string to all wallets
   - Uses local transactions with `pool: "bonk"`
+  - **Zero Balance Handling**: Wallets with zero token balance are handled gracefully with clear error messages
   - Excludes DevWallet (use `/api/bonk/sell-dev` for DevWallet)
-  - Parallel execution in batches of 4 transactions
+  - Parallel execution in batches of 2-5 transactions (depending on RPC type) for optimal rate limit compliance
 
 ### **Bonk Pool Setup Requirements**
 
@@ -527,10 +537,11 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
 
 - All endpoints return JSON.
 - All endpoints perform input validation and return clear error messages on invalid input.
-- All trading endpoints use robust transaction handling, Jito bundles, and follow Solana best practices for reliability.
+- All trading endpoints use robust transaction handling, local transactions via Pump Portal API, and follow Solana best practices for reliability.
 - **Fully Stateless Operation**: All trading endpoints now require wallet credentials to be provided in each request - no server-side wallet storage.
+- **Simplified Sell Operations**: Sell endpoints no longer require client-side token balance lookups. Percentage validation and amount calculation is handled server-side by Pump Portal API for improved efficiency and rate limit compliance.
 - Private keys are never returned by trading endpoints.
-- All transaction results include bundle IDs and transaction signatures for on-chain verification.
+- All transaction results include transaction signatures for on-chain verification.
 - **Wallet Parameter Format**: All trading endpoints expect a `wallets` array with objects containing `name` and `privateKey` properties.
 - **Private Key Format**: All private keys must be base58 encoded Solana keypairs.
 - **Minimum SOL Balance Requirements:** All wallets must maintain minimum SOL balances to cover transaction fees, Jito tips, and rent exemption:
@@ -602,8 +613,10 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
   - *Expected:* All specified wallets buy the token, bundles are confirmed, balances update.
 - **Sell-dev endpoint sells the specified percentage of tokens from DevWallet.**
   - *Expected:* DevWallet's token balance decreases, SOL balance increases, transaction confirmed.
+  - *Expected:* No client-side balance lookups required, percentage-based operation handled by Pump Portal.
 - **Batch-sell endpoint sells the specified percentage of tokens from all non-DevWallets.**
-  - *Expected:* All specified wallets sell tokens, bundles are confirmed, balances update.
+  - *Expected:* All specified wallets sell tokens, transactions are confirmed, balances update.
+  - *Expected:* Zero-balance wallets handled gracefully with clear error messages, no pre-filtering required.
 
 ## Error Handling
 

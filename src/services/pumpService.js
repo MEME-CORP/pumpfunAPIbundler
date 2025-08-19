@@ -667,27 +667,16 @@ async function devSellService(
 
         console.log(`Attempting to sell ${sellAmountPercentage} of ${mintAddress} from DevWallet (${devWallet.publicKey}).`);
 
-        // MONOCODE Fix: Validate SPL token balance before attempting sell using rate-limited RPC
-        console.log(`[PumpService] Checking SPL token balance for ${devWallet.publicKey} and mint ${mintAddress}...`);
-        const tokenBalanceInfo = await getTokenBalance(devWallet.publicKey, mintAddress, connection);
-        const tokenBalance = tokenBalanceInfo.balance;
+        // MONOCODE Fix: Validate & normalize percentage string only - Portal API handles balance lookup
+        const pct = String(sellAmountPercentage).endsWith('%') 
+            ? String(sellAmountPercentage)
+            : `${sellAmountPercentage}%`;
+        const num = parseFloat(pct.replace('%', ''));
+        if (isNaN(num) || num <= 0 || num > 100) {
+            throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 1-100.`);
+        }
         
-        if (tokenBalance === 0) {
-            throw new Error(`DevWallet has no tokens of mint ${mintAddress} to sell. Current balance: ${tokenBalance}`);
-        }
-
-        // Parse percentage and calculate actual sell amount
-        const percentage = parseFloat(sellAmountPercentage.replace('%', ''));
-        if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
-            throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 0 and 100.`);
-        }
-
-        const amountToSell = Math.floor(tokenBalance * (percentage / 100));
-        console.log(`[PumpService] Token balance: ${tokenBalance}, selling ${percentage}% (${amountToSell} tokens)`);
-
-        if (amountToSell === 0) {
-            throw new Error(`Calculated sell amount is zero. Token balance (${tokenBalance}) may be too low for ${percentage}% sell.`);
-        }
+        console.log(`[PumpService] Validated sell percentage: ${pct} for ${mintAddress}`);
 
         // DevWallet is the tipper for this single transaction bundle
         if (!await checkWalletBalancesForTokenOperations([{ ...devWallet, isTipper: true }], { 
@@ -698,13 +687,12 @@ async function devSellService(
 
         console.log(`[PumpService] Executing DevWallet sell transaction for ${sellAmountPercentage} of ${mintAddress}...`);
 
-        // MONOCODE Fix: Pass percentage string directly to Portal API instead of calculated amount
-        // Portal API supports percentage strings for sell operations (e.g., "100%")
+        // Portal API handles balance lookup and calculation internally
         const sellSignature = await executeTradeLocalTransaction(
             'sell',
             mintAddress,
             devWallet.keypair,
-            sellAmountPercentage, // Pass percentage string directly (e.g., "100%")
+            pct, // Pass normalized percentage string
             false, // denominatedInSol - false when using percentage
             slippageBps
         );
@@ -715,7 +703,7 @@ async function devSellService(
             signature: sellSignature,
             success: true,
             error: null,
-            amount: amountToSell // Log actual token amount sold
+            amount: pct // Log percentage sold
         });
 
         console.log(`[PumpService] ✅ DevWallet sell transaction successful: ${sellSignature}`);
@@ -830,44 +818,30 @@ async function batchSellService(
                     throw new Error(`Insufficient SOL balance in one or more wallets for batch ${i + 1} (including rent exemption requirements).`);
                 }
 
-                // Prepare sell requests with per-wallet token balance check to avoid zero-amount sells
-                const percentage = parseFloat(String(sellAmountPercentage).replace('%', ''));
-                if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
-                    throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 0 and 100.`);
+                // MONOCODE Fix: Validate & normalize percentage string - let Portal API handle balance lookup
+                const pct = String(sellAmountPercentage).endsWith('%') 
+                    ? String(sellAmountPercentage)
+                    : `${sellAmountPercentage}%`;
+                const num = parseFloat(pct.replace('%', ''));
+                if (isNaN(num) || num <= 0 || num > 100) {
+                    throw new Error(`Invalid sell percentage: ${sellAmountPercentage}. Must be between 1-100.`);
                 }
-                // MONOCODE Fix: Reduced batch size to prevent 429 errors - 2 for public RPC, 5 for premium RPC
-                const walletPublicKeys = batch.map(wallet => wallet.publicKey);
-                const batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 5 : 2;
-                const batchedBalanceResults = await getBatchedTokenBalances(walletPublicKeys, mintAddress, connection, batchSize);
-                const tokenBalances = batchedBalanceResults.map(result => result.balance);
-                let skippedZero = 0;
-                const sellRequests = [];
-                batch.forEach((wallet, idx) => {
-                    const balance = tokenBalances[idx] || 0;
-                    const amountToSell = Math.floor(balance * (percentage / 100));
-                    if (amountToSell > 0) {
-                        sellRequests.push({
-                            action: 'sell',
-                            mintAddress: mintAddress,
-                            signerKeypair: wallet.keypair,
-                            amount: amountToSell,
-                            denominatedInSol: false,
-                            slippage: slippageBps,
-                            walletName: wallet.name
-                        });
-                    } else {
-                        skippedZero++;
-                        console.log(`[PumpService] Skipping wallet ${wallet.name} (${wallet.publicKey}) - token balance ${balance} -> ${percentage}% results in 0 tokens to sell`);
-                    }
-                });
+                
+                // Pass percentage to all wallets; Portal API will handle zero-balance failures
+                const sellRequests = batch.map(wallet => ({
+                    action: 'sell',
+                    mintAddress,
+                    signerKeypair: wallet.keypair,
+                    amount: pct,
+                    denominatedInSol: false,
+                    slippage: slippageBps,
+                    walletName: wallet.name
+                }));
+                
+                console.log(`[PumpService] Prepared ${sellRequests.length} sell requests with ${pct} for batch ${i + 1}`);
 
-                if (sellRequests.length === 0) {
-                    console.warn(`[PumpService] No wallets with non-zero sell amount in batch ${i + 1}. Skipped ${skippedZero} wallet(s).`);
-                    batchBundleResult.success = false;
-                    batchBundleResult.skipped = true;
-                    batchBundleResult.message = `Batch ${i + 1}: skipped (no wallets with non-zero sell amount; skipped ${skippedZero})`;
-                    overallResult.skippedBundles++;
-                } else {
+                // Execute all requests; Portal API will fail zero-balance wallets gracefully
+                if (sellRequests.length > 0) {
                     console.log(`[PumpService] Executing ${sellRequests.length} parallel sell transactions for batch ${i + 1} of ${numBatches}...`);
 
                     // Execute sell transactions in parallel (max 4 at a time)
