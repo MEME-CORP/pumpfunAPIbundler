@@ -50,7 +50,7 @@ const bs58Decoder = bs58.default || bs58;
 const DEV_WALLET_NAME = "DevWallet";
 const FIRST_BUNDLED_BASE_NAME = "First Bundled Wallet";
 const MAX_BUYERS_IN_CREATE_BUNDLE = 4; // DevWallet + 4 First Bundled Wallets = 5 TXs max for create bundle
-const MAX_WALLETS_PER_BUNDLE = 5; // Max transactions per Jito bundle for batch operations
+const MAX_WALLETS_PER_BUNDLE = 20; // Max 5 transactions per Jito bundle for batch operations
 
 const MIN_SOL_BALANCE_TIPPER = 0.055;
 const MIN_SOL_BALANCE_NON_TIPPER = 0.025;
