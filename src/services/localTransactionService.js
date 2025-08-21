@@ -2,7 +2,7 @@
  * LOCAL TRANSACTION SERVICE - Pump Portal Integration
  * 
  * This service handles local transactions via Pump Portal API to replace Jito bundles.
- * Uses parallel transaction groups of UNIFIED_PARALLEL_BATCH_SIZE (default 20) with 0.0005 SOL priority fee.
+ * Uses parallel transaction groups of UNIFIED_PARALLEL_BATCH_SIZE (default 15) with 0.0005 SOL priority fee.
  * 
  * MONOCODE Compliance: Observable implementation with structured logging,
  * explicit error handling, and dependency transparency.
@@ -18,7 +18,7 @@ const { sleep, confirmTransactionAdvanced, rateLimitedRpcCall } = require('../ut
 // Constants for local transactions
 const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = 'https://pumpportal.fun/api/trade-local';
 const DEFAULT_PRIORITY_FEE = 0.0005; // 0.0005 SOL as specified
-const UNIFIED_PARALLEL_BATCH_SIZE = 20; // Single visible constant for all parallel batch processing
+const UNIFIED_PARALLEL_BATCH_SIZE = 15; // Single visible constant for all parallel batch processing
 const FETCH_TIMEOUT_MS = 20000; // Abort fetch if Pump Portal hangs
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
