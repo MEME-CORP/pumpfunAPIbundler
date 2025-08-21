@@ -2,7 +2,7 @@
  * LOCAL TRANSACTION SERVICE - Pump Portal Integration
  * 
  * This service handles local transactions via Pump Portal API to replace Jito bundles.
- * Uses parallel transaction groups (4-5 transactions) with 0.0005 SOL priority fee.
+ * Uses parallel transaction groups of UNIFIED_PARALLEL_BATCH_SIZE (default 20) with 0.0005 SOL priority fee.
  * 
  * MONOCODE Compliance: Observable implementation with structured logging,
  * explicit error handling, and dependency transparency.
@@ -18,8 +18,7 @@ const { sleep, confirmTransactionAdvanced, rateLimitedRpcCall } = require('../ut
 // Constants for local transactions
 const PUMP_PORTAL_TRADE_LOCAL_ENDPOINT = 'https://pumpportal.fun/api/trade-local';
 const DEFAULT_PRIORITY_FEE = 0.0005; // 0.0005 SOL as specified
-const PARALLEL_BATCH_SIZE_PUBLIC = 2; // Process 2 transactions in parallel for public RPC
-const PARALLEL_BATCH_SIZE_PREMIUM = 5; // Process 5 transactions in parallel for premium RPC
+const UNIFIED_PARALLEL_BATCH_SIZE = 20; // Single visible constant for all parallel batch processing
 const FETCH_TIMEOUT_MS = 20000; // Abort fetch if Pump Portal hangs
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
@@ -191,10 +190,9 @@ async function executeTradeLocalTransaction(action, mintAddress, signerKeypair, 
  * @returns {Promise<Array>} Array of transaction signatures
  */
 async function executeParallelTransactions(transactionRequests, batchSize = null) {
-    // MONOCODE Fix: Dynamic batch size based on RPC type to prevent 429 errors
+    // MONOCODE: Unified batch size for Pump Portal local API flows
     if (batchSize === null) {
-        batchSize = process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com') ? 
-            PARALLEL_BATCH_SIZE_PREMIUM : PARALLEL_BATCH_SIZE_PUBLIC;
+        batchSize = UNIFIED_PARALLEL_BATCH_SIZE;
     }
     console.log(`[LocalTransactionService] Executing ${transactionRequests.length} transactions in parallel batches of ${batchSize}`);
     
@@ -384,8 +382,7 @@ module.exports = {
     // Constants
     PUMP_PORTAL_TRADE_LOCAL_ENDPOINT,
     DEFAULT_PRIORITY_FEE,
-    PARALLEL_BATCH_SIZE_PUBLIC,
-    PARALLEL_BATCH_SIZE_PREMIUM,
+    UNIFIED_PARALLEL_BATCH_SIZE,
     FETCH_TIMEOUT_MS,
     MAX_RETRIES,
     RETRY_DELAY_MS

@@ -3,7 +3,7 @@
  * 
  * ✅ MIGRATED: This service now uses local transactions via Pump Portal API
  * instead of Jito bundles (review july 28th commit for using jito again) to avoid rate limiting issues. 
- * Transactions are executed in parallel batches of 4 with 0.0005 SOL priority fee for optimal performance.
+ * Transactions are executed in parallel batches of UNIFIED_PARALLEL_BATCH_SIZE (default 20) with 0.0005 SOL priority fee for optimal performance.
  * 
  * MONOCODE Compliance: Observable implementation with structured logging,
  * explicit error handling, and dependency transparency.
@@ -40,7 +40,8 @@ const {
     executeParallelTransactions, 
     confirmParallelTransactions,
     confirmTransactionViaWebSocket,
-    DEFAULT_PRIORITY_FEE 
+    DEFAULT_PRIORITY_FEE,
+    UNIFIED_PARALLEL_BATCH_SIZE
 } = require('./localTransactionService');
 const { sleep, getRecentBlockhash, confirmTransactionAdvanced } = require('../utils/transactionUtils');
 
@@ -403,8 +404,8 @@ async function createAndBuyService(
                 walletName: buyerInfo.wallet.name
             }));
             
-            // Execute buy transactions in parallel (max 4 at a time)
-            const buyResults = await executeParallelTransactions(buyRequests, 4);
+            // Execute buy transactions in parallel (unified batch size)
+            const buyResults = await executeParallelTransactions(buyRequests, UNIFIED_PARALLEL_BATCH_SIZE);
             
             // Add buy results to transactions array
             buyResults.forEach(buyResult => {
@@ -555,8 +556,8 @@ async function batchBuyService(
 
                 console.log(`[PumpService] Executing ${batch.length} parallel buy transactions for batch ${i + 1} of ${numBatches}...`);
 
-                // Execute buy transactions in parallel (max 4 at a time)
-                const buyResults = await executeParallelTransactions(buyRequests, 4);
+                // Execute buy transactions in parallel (unified batch size)
+                const buyResults = await executeParallelTransactions(buyRequests, UNIFIED_PARALLEL_BATCH_SIZE);
                 
                 // Add results to batch result
                 buyResults.forEach(buyResult => {
@@ -844,8 +845,8 @@ async function batchSellService(
                 if (sellRequests.length > 0) {
                     console.log(`[PumpService] Executing ${sellRequests.length} parallel sell transactions for batch ${i + 1} of ${numBatches}...`);
 
-                    // Execute sell transactions in parallel (max 4 at a time)
-                    const sellResults = await executeParallelTransactions(sellRequests, 4);
+                    // Execute sell transactions in parallel (unified batch size)
+                    const sellResults = await executeParallelTransactions(sellRequests, UNIFIED_PARALLEL_BATCH_SIZE);
                     
                     // Add results to batch result
                     sellResults.forEach(sellResult => {

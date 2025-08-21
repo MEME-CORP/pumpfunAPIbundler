@@ -391,7 +391,7 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
   - **Stateless Operation**: All wallet credentials must be provided in the request
   - **Zero Balance Handling**: Wallets with zero token balance are handled gracefully with clear error messages from Pump Portal
   - **Excluded Wallets**: Automatically excludes DevWallet from batch selling (use `/api/pump/sell-dev` for DevWallet)
-  - **Parallel Execution**: Processes sells in batches of 2-5 transactions (depending on RPC type) for optimal rate limit compliance
+  - **Parallel Execution**: Processes sells in batches of 20 transactions (unified batch size)
   - **Private Keys**: Must be base58 encoded Solana keypairs
 - **Minimum SOL Balance:** Each wallet needs **0.025 SOL** minimum to cover transaction fees and priority fees
 
@@ -454,7 +454,7 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
 - **Important Notes:**
   - Uses local transactions with `pool: "bonk"`
   - Excludes DevWallet and First Bundled Wallets 1-4
-  - Parallel execution in batches of 4 transactions
+  - Parallel execution in batches of 20 transactions (unified batch size)
 
 #### 3. Bonk Dev Sell
 - **POST** `/api/bonk/sell-dev`
@@ -498,7 +498,7 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
   - Uses local transactions with `pool: "bonk"`
   - **Zero Balance Handling**: Wallets with zero token balance are handled gracefully with clear error messages
   - Excludes DevWallet (use `/api/bonk/sell-dev` for DevWallet)
-  - Parallel execution in batches of 2-5 transactions (depending on RPC type) for optimal rate limit compliance
+  - Parallel execution in batches of 20 transactions (unified batch size)
 
 ### **Bonk Pool Setup Requirements**
 
@@ -526,8 +526,8 @@ The service matches `buyAmountsSOL` keys to wallet names using flexible pattern 
 | Dev Wallet Auth | Private key | Wallet-specific API key |
 | API Key Source | Not required | Per-wallet (from Lightning wallet creation) |
 | Buy/Sell Operations | Local transactions | Local transactions |
-| Pool Parameter | `"pump"` | `"bonk"` |
-| Parallel Execution | 4 transactions | 4 transactions |
+| Pool Parameter | "pump" | "bonk" |
+| Parallel Execution | 20 transactions | 20 transactions |
 | Error Handling | Same | Same |
 | Confirmation | WebSocket | WebSocket |
 

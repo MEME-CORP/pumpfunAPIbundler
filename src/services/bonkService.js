@@ -4,7 +4,7 @@
  * ✅ BONK POOL: This service handles Bonk pool operations via Pump Portal API
  * - Token creation uses Lightning API with external IPFS (nft-storage.letsbonk22.workers.dev)
  * - Buy/Sell operations use local transactions with pool: "bonk" parameter
- * - Transactions are executed in parallel batches of 4 with 0.0005 SOL priority fee
+ * - Transactions are executed in parallel batches of 20 (unified) with 0.0005 SOL priority fee // not applied yet, check pump service as reference
  * 
  * MONOCODE Compliance: Observable implementation with structured logging,
  * explicit error handling, and dependency transparency.
